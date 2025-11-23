@@ -1,20 +1,25 @@
 """Main TUI application."""
 
+from __future__ import annotations
+
 import asyncio
+import subprocess
+from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, Center, VerticalScroll
-from textual.widgets import Header, Footer, Static, LoadingIndicator
 from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.message import Message
+from textual.widgets import Footer, Header, LoadingIndicator, Static
 
 from .config import Config
 from .data import fetch_all_repos
+from .launcher import launch_claude
 from .models import Issue
 from .widgets.repo_list import RepoListWidget
-from .widgets.issue_list import IssueListWidget
-from .launcher import launch_claude
+
+if TYPE_CHECKING:
+    from .models import RepoOverview
 
 
 HELP_TEXT = """
@@ -22,15 +27,14 @@ HELP_TEXT = """
 
 [cyan]Navigation[/cyan]
   j/k or ↑/↓    Move up/down
-  Tab           Switch between panes
   Space         Expand/collapse repo issues
 
 [cyan]Actions[/cyan]
-  Enter         Launch Claude Code
+  c             Launch Claude Code
   e             Show issue details
   o             Open in browser
   r             Refresh data
-  /             Search (coming soon)
+  s             Toggle SonarCloud check
   q             Quit
   ?             Show this help
 
@@ -38,7 +42,7 @@ HELP_TEXT = """
 """
 
 
-class HelpScreen(ModalScreen):
+class HelpScreen(ModalScreen[None]):
     """Modal screen showing help."""
 
     BINDINGS = [Binding("escape", "dismiss", "Close")]
@@ -51,7 +55,7 @@ class HelpScreen(ModalScreen):
         self.dismiss()
 
 
-class LoadingScreen(ModalScreen):
+class LoadingScreen(ModalScreen[None]):
     """Modal screen showing a loading spinner with custom message."""
 
     DEFAULT_CSS = """
@@ -84,7 +88,7 @@ class LoadingScreen(ModalScreen):
     }
     """
 
-    def __init__(self, message: str):
+    def __init__(self, message: str) -> None:
         super().__init__()
         self.message = message
 
@@ -100,72 +104,13 @@ class LoadingScreen(ModalScreen):
         self.query_one("#loading-repo", Static).update(repo_name)
 
 
-class IssueDetailScreen(ModalScreen):
+class IssueDetailScreen(ModalScreen[int]):
     """Modal screen showing full issue details."""
-
-    class IssueNavigated(Message):
-        """Emitted when user navigates to a different issue."""
-        def __init__(self, index: int):
-            self.index = index
-            super().__init__()
 
     BINDINGS = [
         Binding("escape", "close_modal", "Close"),
         Binding("e", "close_modal", "Close"),
     ]
-
-    def action_close_modal(self) -> None:
-        """Close modal and return final index."""
-        self.dismiss(result=self.current_index)
-
-    def key_j(self) -> None:
-        """Scroll down."""
-        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
-        scroll.scroll_relative(y=3, animate=False)
-
-    def key_k(self) -> None:
-        """Scroll up."""
-        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
-        scroll.scroll_relative(y=-3, animate=False)
-
-    def key_down(self) -> None:
-        """Scroll down."""
-        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
-        scroll.scroll_relative(y=3, animate=False)
-
-    def key_up(self) -> None:
-        """Scroll up."""
-        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
-        scroll.scroll_relative(y=-3, animate=False)
-
-    def key_h(self) -> None:
-        """Previous issue."""
-        self._navigate(-1)
-
-    def key_l(self) -> None:
-        """Next issue."""
-        self._navigate(1)
-
-    def key_left(self) -> None:
-        """Previous issue."""
-        self._navigate(-1)
-
-    def key_right(self) -> None:
-        """Next issue."""
-        self._navigate(1)
-
-    def _navigate(self, direction: int) -> None:
-        """Navigate to prev/next issue in place."""
-        if not self.issue_list:
-            return
-
-        new_index = self.current_index + direction
-        if 0 <= new_index < len(self.issue_list):
-            self.current_index = new_index
-            self.issue = self.issue_list[new_index]
-            self._update_content()
-            # Notify app to sync issue list widget
-            self.post_message(self.IssueNavigated(new_index))
 
     DEFAULT_CSS = """
     IssueDetailScreen {
@@ -218,7 +163,13 @@ class IssueDetailScreen(ModalScreen):
     }
     """
 
-    def __init__(self, issue: Issue, repo_name: str = "", issue_list: list = None, current_index: int = 0):
+    def __init__(
+        self,
+        issue: Issue,
+        repo_name: str = "",
+        issue_list: list[Issue] | None = None,
+        current_index: int = 0,
+    ) -> None:
         super().__init__()
         self.issue = issue
         self.repo_name = repo_name
@@ -242,12 +193,66 @@ class IssueDetailScreen(ModalScreen):
         """Update content on mount."""
         self._update_content()
 
+    def action_close_modal(self) -> None:
+        """Close modal and return final index."""
+        self.dismiss(result=self.current_index)
+
+    def key_j(self) -> None:
+        """Scroll down."""
+        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
+        scroll.scroll_relative(y=3, animate=False)
+
+    def key_k(self) -> None:
+        """Scroll up."""
+        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
+        scroll.scroll_relative(y=-3, animate=False)
+
+    def key_down(self) -> None:
+        """Scroll down."""
+        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
+        scroll.scroll_relative(y=3, animate=False)
+
+    def key_up(self) -> None:
+        """Scroll up."""
+        scroll = self.query_one("#issue-body-scroll", VerticalScroll)
+        scroll.scroll_relative(y=-3, animate=False)
+
+    def key_h(self) -> None:
+        """Previous issue."""
+        self._navigate(-1)
+
+    def key_l(self) -> None:
+        """Next issue."""
+        self._navigate(1)
+
+    def key_left(self) -> None:
+        """Previous issue."""
+        self._navigate(-1)
+
+    def key_right(self) -> None:
+        """Next issue."""
+        self._navigate(1)
+
+    def _navigate(self, direction: int) -> None:
+        """Navigate to prev/next issue in place."""
+        if not self.issue_list:
+            return
+
+        new_index = self.current_index + direction
+        if 0 <= new_index < len(self.issue_list):
+            self.current_index = new_index
+            self.issue = self.issue_list[new_index]
+            self._update_content()
+
     def _update_content(self) -> None:
         """Update all content for current issue."""
         issue = self.issue
 
         # Title
-        title_text = f"[bold]{self.repo_name}[/bold] [cyan]#{issue.number}[/cyan] {self._escape(issue.title)}"
+        title_text = (
+            f"[bold]{self.repo_name}[/bold] "
+            f"[cyan]#{issue.number}[/cyan] {self._escape(issue.title)}"
+        )
         self.query_one("#issue-title", Static).update(title_text)
 
         # Meta
@@ -255,7 +260,6 @@ class IssueDetailScreen(ModalScreen):
         if issue.assignee:
             meta_parts.append(f"Assignee: {issue.assignee}")
         meta_parts.append(f"State: {issue.state}")
-        # Show position in list
         if self.issue_list:
             meta_parts.append(f"({self.current_index + 1}/{len(self.issue_list)})")
         self.query_one("#issue-meta", Static).update(" | ".join(meta_parts))
@@ -282,11 +286,11 @@ class IssueDetailScreen(ModalScreen):
 class StatusBar(Static):
     """Status bar showing refresh time and counts."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("Loading...")
         self.add_class("status-bar")
 
-    def update_stats(self, repo_count: int, issue_count: int, message: str = ""):
+    def update_stats(self, repo_count: int, issue_count: int, message: str = "") -> None:
         """Update status bar with current stats."""
         if message:
             self.update(f"{message} | Repos: {repo_count} | Issues: {issue_count}")
@@ -294,26 +298,18 @@ class StatusBar(Static):
             self.update(f"Repos: {repo_count} | Issues: {issue_count}")
 
 
-class RepoOverviewApp(App):
+class RepoOverviewApp(App[None]):
     """Interactive TUI for GitHub repository overview."""
 
     ENABLE_COMMAND_PALETTE = False
 
     CSS = """
     #main-container {
-        layout: horizontal;
         height: 1fr;
     }
 
     #repo-pane {
-        width: 2fr;
         border: solid $primary;
-        height: 100%;
-    }
-
-    #issue-pane {
-        width: 3fr;
-        border: solid $secondary;
         height: 100%;
     }
 
@@ -326,10 +322,6 @@ class RepoOverviewApp(App):
     }
 
     RepoListWidget {
-        height: 1fr;
-    }
-
-    IssueListWidget {
         height: 1fr;
     }
 
@@ -360,42 +352,35 @@ class RepoOverviewApp(App):
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("o", "open_browser", "Open", priority=True),
         Binding("e", "expand_issue", "Details", priority=True),
+        Binding("c", "launch", "Claude", priority=True),
+        Binding("s", "toggle_sonar", "Sonar", priority=True),
         Binding("question_mark", "help", "Help", priority=True),
-        Binding("tab", "focus_next", "Switch Pane", show=False),
         Binding("space", "toggle_expand", "Expand", priority=True),
-        Binding("enter", "launch", "Launch", priority=True),
-        Binding("slash", "search", "Search", priority=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
         Binding("up", "cursor_up", "Up", show=False),
     ]
 
-    def __init__(self, check_sonar: bool = False):
+    def __init__(self, check_sonar: bool = False) -> None:
         super().__init__()
         self.config = Config()
-        self.repos = []
+        self.repos: list[RepoOverview] = []
         self.check_sonar = check_sonar
 
     def compose(self) -> ComposeResult:
         """Create the UI layout."""
         yield Header()
 
-        with Horizontal(id="main-container"):
-            with Vertical(id="repo-pane"):
-                yield Static("Repositories", classes="pane-title")
-                yield RepoListWidget(id="repo-list")
-
-            with Vertical(id="issue-pane"):
-                yield Static("Issues", classes="pane-title")
-                yield IssueListWidget(id="issue-list")
+        with Vertical(id="main-container"), Vertical(id="repo-pane"):
+            yield Static("Repositories", classes="pane-title")
+            yield RepoListWidget(id="repo-list")
 
         yield StatusBar()
         yield Footer()
 
     async def on_mount(self) -> None:
         """Load data when app starts."""
-        # Use call_later to show loading screen after mount completes
         self.call_later(self._initial_load)
 
     async def _initial_load(self) -> None:
@@ -403,7 +388,6 @@ class RepoOverviewApp(App):
         loading_screen = LoadingScreen("Fetching repositories...")
         self.push_screen(loading_screen)
 
-        # Small delay to let screen render
         await asyncio.sleep(0.1)
 
         try:
@@ -411,7 +395,7 @@ class RepoOverviewApp(App):
         finally:
             self.pop_screen()
 
-    async def _do_refresh(self, loading_screen: LoadingScreen = None) -> None:
+    async def _do_refresh(self, loading_screen: LoadingScreen | None = None) -> None:
         """Actually fetch and update data."""
         status_bar = self.query_one(StatusBar)
 
@@ -419,17 +403,14 @@ class RepoOverviewApp(App):
             if loading_screen:
                 loading_screen.update_message(f"Fetching {current}/{total}", repo_name)
 
-        self.repos = await fetch_all_repos(
-            self.config, self.check_sonar, progress_callback
-        )
+        self.repos = await fetch_all_repos(self.config, self.check_sonar, progress_callback)
 
-        # Update widgets
         repo_list = self.query_one("#repo-list", RepoListWidget)
         repo_list.set_repos(self.repos)
 
-        # Update status bar
         total_issues = sum(r.open_issues_count for r in self.repos)
-        status_bar.update_stats(len(self.repos), total_issues, "Ready")
+        sonar_indicator = " [SonarCloud ON]" if self.check_sonar else ""
+        status_bar.update_stats(len(self.repos), total_issues, f"Ready{sonar_indicator}")
 
     async def action_refresh(self) -> None:
         """Refresh repository data."""
@@ -443,15 +424,14 @@ class RepoOverviewApp(App):
         finally:
             self.pop_screen()
 
-    def on_repo_list_widget_repo_selected(self, event) -> None:
-        """Handle repo selection - update issue list."""
-        issue_list = self.query_one("#issue-list", IssueListWidget)
-        issue_list.set_issues(event.repo.issues if event.repo else [])
+    async def action_toggle_sonar(self) -> None:
+        """Toggle SonarCloud checking and refresh."""
+        self.check_sonar = not self.check_sonar
+        await self.action_refresh()
 
     async def action_launch(self) -> None:
         """Launch Claude Code for selected repo/issue."""
         repo_list = self.query_one("#repo-list", RepoListWidget)
-        issue_list = self.query_one("#issue-list", IssueListWidget)
         status_bar = self.query_one(StatusBar)
 
         selected_repo = repo_list.get_selected_repo()
@@ -463,24 +443,21 @@ class RepoOverviewApp(App):
             status_bar.update(f"Repo not found locally: ~/Code/{selected_repo.name}")
             return
 
-        # Check if issue pane has focus and an issue is selected
-        selected_issue = None
-        if issue_list.has_focus:
-            selected_issue = issue_list.get_selected_issue()
+        # Check if an inline issue is selected
+        inline = repo_list.get_selected_inline_issue()
+        selected_issue = inline[1] if inline else None
 
-        # Show loading spinner
-        if selected_issue:
-            msg = f"Launching #{selected_issue.number}..."
-        else:
-            msg = f"Launching {selected_repo.name}..."
+        msg = (
+            f"Launching #{selected_issue.number}..."
+            if selected_issue
+            else f"Launching {selected_repo.name}..."
+        )
         loading_screen = LoadingScreen(msg)
         await self.push_screen(loading_screen)
 
-        # Small delay to let spinner render, then launch
         await asyncio.sleep(0.1)
         result = launch_claude(selected_repo, selected_issue)
 
-        # Wait a moment to show spinner, then dismiss
         await asyncio.sleep(1.5)
         self.pop_screen()
 
@@ -488,23 +465,23 @@ class RepoOverviewApp(App):
 
     async def action_open_browser(self) -> None:
         """Open selected item in browser."""
-        import subprocess
-
         repo_list = self.query_one("#repo-list", RepoListWidget)
-        issue_list = self.query_one("#issue-list", IssueListWidget)
 
         url = None
-        if issue_list.has_focus:
-            issue = issue_list.get_selected_issue()
-            if issue:
-                url = issue.url
+        inline = repo_list.get_selected_inline_issue()
+        if inline:
+            url = inline[1].url
         else:
             repo = repo_list.get_selected_repo()
             if repo:
                 url = repo.url
 
         if url:
-            subprocess.Popen(["wslview", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["wslview", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
     async def action_toggle_expand(self) -> None:
         """Toggle expand/collapse for selected repo."""
@@ -514,95 +491,52 @@ class RepoOverviewApp(App):
     async def action_cursor_down(self) -> None:
         """Move cursor down in focused list."""
         focused = self.focused
-        if isinstance(focused, (RepoListWidget, IssueListWidget)):
+        if isinstance(focused, RepoListWidget):
             focused.action_cursor_down()
 
     async def action_cursor_up(self) -> None:
         """Move cursor up in focused list."""
         focused = self.focused
-        if isinstance(focused, (RepoListWidget, IssueListWidget)):
+        if isinstance(focused, RepoListWidget):
             focused.action_cursor_up()
-
-    async def action_search(self) -> None:
-        """Focus search input."""
-        # TODO: Implement search modal
-        pass
 
     async def action_expand_issue(self) -> None:
         """Show full issue details in a modal."""
-        issue_list = self.query_one("#issue-list", IssueListWidget)
         repo_list = self.query_one("#repo-list", RepoListWidget)
 
-        issue = None
-        repo_name = ""
-
-        if issue_list.has_focus:
-            # Issue pane has focus - use its selection
-            issue = issue_list.get_selected_issue()
-            repo = repo_list.get_selected_repo()
-            repo_name = repo.name if repo else ""
-        else:
-            # Repo pane has focus - check if inline issue is selected
-            inline = repo_list.get_selected_inline_issue()
-            if inline:
-                repo, issue = inline
-                repo_name = repo.name
-                # Sync issue list to match
-                for i, iss in enumerate(issue_list.issues):
-                    if iss.number == issue.number:
-                        issue_list._current_index = i
-                        issue_list.highlighted = i
-                        break
-            else:
-                # On a repo row - use first issue from issue list
-                repo = repo_list.get_selected_repo()
-                repo_name = repo.name if repo else ""
-                if issue_list.issues:
-                    issue_list._current_index = 0
-                    issue_list.highlighted = 0
-                    issue = issue_list.issues[0]
-
-        if issue:
-            self._current_repo_name = repo_name
-            current_index = issue_list._current_index
-            await self.push_screen(
-                IssueDetailScreen(issue, repo_name, issue_list.issues, current_index),
-                callback=self._on_issue_detail_dismiss
+        inline = repo_list.get_selected_inline_issue()
+        if inline:
+            repo, issue = inline
+            # Get all issues for navigation
+            issue_list = repo.issues
+            current_index = next(
+                (i for i, iss in enumerate(issue_list) if iss.number == issue.number),
+                0,
             )
-
-    def _on_issue_detail_dismiss(self, result) -> None:
-        """Sync issue list when modal is dismissed."""
-        if result is not None and isinstance(result, int):
-            issue_list = self.query_one("#issue-list", IssueListWidget)
-            repo_list = self.query_one("#repo-list", RepoListWidget)
-
-            # Sync issue list
-            issue_list._current_index = result
-            issue_list.highlighted = result
-
-            # Sync repo list if expanded
-            if issue_list.issues and result < len(issue_list.issues):
-                issue = issue_list.issues[result]
-                repo = repo_list.get_selected_repo()
-                if repo and repo.name in repo_list.expanded:
-                    target_id = f"issue:{repo.name}:{issue.number}"
-                    repo_list._select_by_id(target_id)
-
-    def on_issue_detail_screen_issue_navigated(self, event: IssueDetailScreen.IssueNavigated) -> None:
-        """Sync issue list widget and repo list when user navigates in modal."""
-        issue_list = self.query_one("#issue-list", IssueListWidget)
-        repo_list = self.query_one("#repo-list", RepoListWidget)
-
-        # Sync issue list
-        issue_list._current_index = event.index
-        issue_list.highlighted = event.index
-
-        # Sync repo list if it has inline issues expanded
-        if issue_list.issues and event.index < len(issue_list.issues):
-            issue = issue_list.issues[event.index]
+            await self.push_screen(
+                IssueDetailScreen(issue, repo.name, issue_list, current_index),
+                callback=self._on_issue_detail_dismiss,
+            )
+        else:
+            # On a repo row - expand to show issues first, or show first issue
             repo = repo_list.get_selected_repo()
-            if repo and repo.name in repo_list.expanded:
-                # Find and select the inline issue in repo list
+            if repo and repo.issues:
+                if repo.name not in repo_list.expanded:
+                    repo_list.toggle_expand()
+                else:
+                    # Already expanded, show first issue
+                    await self.push_screen(
+                        IssueDetailScreen(repo.issues[0], repo.name, repo.issues, 0),
+                        callback=self._on_issue_detail_dismiss,
+                    )
+
+    def _on_issue_detail_dismiss(self, result: int | None) -> None:
+        """Sync repo list when modal is dismissed."""
+        if result is not None:
+            repo_list = self.query_one("#repo-list", RepoListWidget)
+            repo = repo_list.get_selected_repo()
+            if repo and repo.name in repo_list.expanded and result < len(repo.issues):
+                issue = repo.issues[result]
                 target_id = f"issue:{repo.name}:{issue.number}"
                 repo_list._select_by_id(target_id)
 
@@ -611,7 +545,7 @@ class RepoOverviewApp(App):
         await self.push_screen(HelpScreen())
 
 
-def main():
+def main() -> None:
     """Entry point for the repo-tui command."""
     app = RepoOverviewApp()
     app.run()

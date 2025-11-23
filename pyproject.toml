@@ -53,6 +53,15 @@ where = ["src"]
 line-length = 100
 target-version = "py312"
 
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -72,18 +81,10 @@ ignore = [
     "B905",  # zip without explicit strict parameter
 ]
 
-exclude = [
-    ".git",
-    ".venv",
-    "__pycache__",
-    "build",
-    "dist",
-]
-
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["repo_tui"]
 
 # === MYPY CONFIGURATION ===

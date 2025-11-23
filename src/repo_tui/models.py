@@ -1,37 +1,41 @@
 """Data models for repo overview."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Dict, Optional
 
 
 @dataclass
 class Issue:
     """GitHub Issue data."""
+
     number: int
     title: str
     url: str
-    labels: List[str]
+    labels: list[str]
     state: str
     body: str = ""
-    assignee: Optional[str] = None
+    assignee: str | None = None
 
 
 @dataclass
 class SonarStatus:
     """SonarCloud quality gate status."""
+
     project_key: str
     status: str  # OK, ERROR, WARN, NONE
     url: str
-    conditions: List[Dict[str, str]]
+    conditions: list[dict[str, str]]
 
 
 @dataclass
 class RepoOverview:
     """Repository overview with issues and SonarCloud status."""
+
     name: str
     owner: str
     url: str
     open_issues_count: int
-    issues: List[Issue]
-    sonar_status: Optional[SonarStatus]
-    local_path: Optional[str] = None  # Path if repo exists locally
+    issues: list[Issue]
+    sonar_status: SonarStatus | None
+    local_path: str | None = None

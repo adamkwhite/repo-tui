@@ -1,13 +1,16 @@
 """Repository list widget."""
 
-from typing import List, Optional
+from __future__ import annotations
 
-from textual.widgets import OptionList
-from textual.widgets.option_list import Option
-from textual.message import Message
+from typing import TYPE_CHECKING
+
 from rich.text import Text
+from textual.message import Message
+from textual.widgets import OptionList
+from textual.widgets.option_list import Option, OptionListOptionHighlighted
 
-from ..models import RepoOverview
+if TYPE_CHECKING:
+    from ..models import Issue, RepoOverview
 
 
 class RepoListWidget(OptionList):
@@ -15,20 +18,20 @@ class RepoListWidget(OptionList):
 
     class RepoSelected(Message):
         """Event emitted when a repo is selected."""
-        def __init__(self, repo: Optional[RepoOverview]):
+
+        def __init__(self, repo: RepoOverview | None) -> None:
             self.repo = repo
             super().__init__()
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.repos: List[RepoOverview] = []
-        self.expanded: set = set()  # Set of expanded repo names
+        self.repos: list[RepoOverview] = []
+        self.expanded: set[str] = set()
 
-    def set_repos(self, repos: List[RepoOverview]) -> None:
+    def set_repos(self, repos: list[RepoOverview]) -> None:
         """Update the list with new repos."""
         self.repos = repos
         self._rebuild_options()
-        # Select first repo by default
         if self.repos:
             self.highlighted = 0
 
@@ -36,18 +39,16 @@ class RepoListWidget(OptionList):
         """Rebuild the option list from current repos."""
         self.clear_options()
 
-        # Sort by priority: failed QG first, then by issue count
         sorted_repos = sorted(
             self.repos,
             key=lambda r: self._get_priority(r),
-            reverse=True
+            reverse=True,
         )
 
         for repo in sorted_repos:
             option = self._build_repo_option(repo)
             self.add_option(option)
 
-            # If expanded, add issues as indented items
             if repo.name in self.expanded:
                 for issue in repo.issues:
                     issue_option = self._build_issue_option(repo, issue)
@@ -66,7 +67,6 @@ class RepoListWidget(OptionList):
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""
-        # Status icon
         if repo.sonar_status and repo.sonar_status.status == "ERROR":
             icon = "[red]●[/red]"
         elif repo.sonar_status and repo.sonar_status.status == "WARN":
@@ -80,22 +80,14 @@ class RepoListWidget(OptionList):
         else:
             icon = "[green]●[/green]"
 
-        # Expand indicator
         expand_icon = "▼" if repo.name in self.expanded else "▶"
-
-        # Issue count badge
-        if repo.open_issues_count > 0:
-            badge = f" [dim]({repo.open_issues_count})[/dim]"
-        else:
-            badge = ""
-
-        # Local indicator - escape brackets to avoid Rich parsing [remote] as a style
+        badge = f" [dim]({repo.open_issues_count})[/dim]" if repo.open_issues_count > 0 else ""
         local = "" if repo.local_path else " [dim]\\[remote][/dim]"
 
         text = Text.from_markup(f"{icon} {expand_icon} {repo.name}{badge}{local}")
         return Option(text, id=f"repo:{repo.name}")
 
-    def _build_issue_option(self, repo: RepoOverview, issue) -> Option:
+    def _build_issue_option(self, repo: RepoOverview, issue: Issue) -> Option:
         """Build a rich option for an issue (indented under repo)."""
         title = issue.title[:40] + "…" if len(issue.title) > 40 else issue.title
         text = Text.from_markup(f"    [dim]#{issue.number}[/dim] {title}")
@@ -115,7 +107,6 @@ class RepoListWidget(OptionList):
             else:
                 self.expanded.add(repo_name)
             self._rebuild_options()
-            # Restore selection to the same repo
             self._select_by_id(f"repo:{repo_name}")
 
     def _select_by_id(self, option_id: str) -> None:
@@ -126,7 +117,7 @@ class RepoListWidget(OptionList):
                 self.highlighted = i
                 break
 
-    def get_selected_repo(self) -> Optional[RepoOverview]:
+    def get_selected_repo(self) -> RepoOverview | None:
         """Get the currently selected repository."""
         selected = self.highlighted
         if selected is None:
@@ -136,22 +127,19 @@ class RepoListWidget(OptionList):
         if not option or not option.id:
             return None
 
-        # Parse the option ID to get repo name
         if option.id.startswith("repo:"):
             repo_name = option.id.split(":", 1)[1]
         elif option.id.startswith("issue:"):
-            # issue:repo_name:issue_number
             repo_name = option.id.split(":")[1]
         else:
             return None
 
-        # Find the repo
         for repo in self.repos:
             if repo.name == repo_name:
                 return repo
         return None
 
-    def get_selected_inline_issue(self) -> Optional[tuple]:
+    def get_selected_inline_issue(self) -> tuple[RepoOverview, Issue] | None:
         """Get the issue if an inline issue is selected.
 
         Returns (repo, issue) tuple or None if a repo row is selected.
@@ -164,9 +152,7 @@ class RepoListWidget(OptionList):
         if not option or not option.id:
             return None
 
-        # Check if it's an inline issue
         if option.id.startswith("issue:"):
-            # issue:repo_name:issue_number
             parts = option.id.split(":")
             if len(parts) >= 3:
                 repo_name = parts[1]
@@ -175,7 +161,6 @@ class RepoListWidget(OptionList):
                 except ValueError:
                     return None
 
-                # Find the repo and issue
                 for repo in self.repos:
                     if repo.name == repo_name:
                         for issue in repo.issues:
@@ -183,7 +168,10 @@ class RepoListWidget(OptionList):
                                 return (repo, issue)
         return None
 
-    def on_option_list_option_highlighted(self, event) -> None:
+    def on_option_list_option_highlighted(
+        self,
+        event: OptionListOptionHighlighted,  # noqa: ARG002
+    ) -> None:
         """Emit event when selection changes."""
         repo = self.get_selected_repo()
         self.post_message(self.RepoSelected(repo))

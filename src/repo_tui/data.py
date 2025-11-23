@@ -1,33 +1,45 @@
 """Data fetching clients for GitHub and SonarCloud."""
 
+from __future__ import annotations
+
 import asyncio
 import json
-import urllib.request
 import urllib.parse
+import urllib.request
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
-from .models import Issue, SonarStatus, RepoOverview
 from .config import Config
+from .models import Issue, RepoOverview, SonarStatus
+
+if TYPE_CHECKING:
+    pass
+
+ProgressCallback = Callable[[int, int, str], Coroutine[Any, Any, None]]
 
 
 class GitHubClient:
     """GitHub API client using gh CLI."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         self.config = config
 
-    async def get_user_repos(self) -> List[Dict]:
+    async def get_user_repos(self) -> list[dict[str, Any]]:
         """Get all repositories for the authenticated user."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "repo", "list",
-                "--json", "name,owner,url,hasIssuesEnabled",
-                "--limit", "1000",
+                "gh",
+                "repo",
+                "list",
+                "--json",
+                "name,owner,url,hasIssuesEnabled",
+                "--limit",
+                "1000",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, _ = await proc.communicate()
 
             if proc.returncode != 0:
                 return []
@@ -39,18 +51,23 @@ class GitHubClient:
         except Exception:
             return []
 
-    async def get_repo_issues(self, owner: str, repo: str) -> List[Issue]:
+    async def get_repo_issues(self, owner: str, repo: str) -> list[Issue]:
         """Get open issues for a repository."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "issue", "list",
-                "--repo", f"{owner}/{repo}",
-                "--json", "number,title,url,labels,state,body,assignees",
-                "--limit", "100",
+                "gh",
+                "issue",
+                "list",
+                "--repo",
+                f"{owner}/{repo}",
+                "--json",
+                "number,title,url,labels,state,body,assignees",
+                "--limit",
+                "100",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, _ = await proc.communicate()
 
             if proc.returncode != 0:
                 return []
@@ -64,7 +81,11 @@ class GitHubClient:
                     labels=[label["name"] for label in issue.get("labels", [])],
                     state=issue["state"],
                     body=issue.get("body", "") or "",
-                    assignee=issue.get("assignees", [{}])[0].get("login") if issue.get("assignees") else None
+                    assignee=(
+                        issue.get("assignees", [{}])[0].get("login")
+                        if issue.get("assignees")
+                        else None
+                    ),
                 )
                 for issue in issues_data
                 if issue["state"] == "OPEN"
@@ -72,7 +93,7 @@ class GitHubClient:
         except Exception:
             return []
 
-    def get_local_repo_path(self, repo_name: str) -> Optional[Path]:
+    def get_local_repo_path(self, repo_name: str) -> Path | None:
         """Check if repo exists locally and return path."""
         local_path = self.config.get_local_code_path() / repo_name
         if local_path.exists() and local_path.is_dir():
@@ -85,15 +106,14 @@ class SonarCloudClient:
 
     BASE_URL = "https://sonarcloud.io/api"
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         self.config = config
 
-    async def get_project_status(self, project_key: str) -> Optional[SonarStatus]:
+    async def get_project_status(self, project_key: str) -> SonarStatus | None:
         """Get quality gate status for a project."""
         try:
             url = f"{self.BASE_URL}/qualitygates/project_status?projectKey={urllib.parse.quote(project_key)}"
 
-            # Run blocking I/O in thread pool
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(None, self._fetch_url, url)
 
@@ -105,12 +125,12 @@ class SonarCloudClient:
                 project_key=project_key,
                 status=project_status.get("status", "NONE"),
                 url=f"https://sonarcloud.io/dashboard?id={urllib.parse.quote(project_key)}",
-                conditions=project_status.get("conditions", [])
+                conditions=project_status.get("conditions", []),
             )
         except Exception:
             return None
 
-    def _fetch_url(self, url: str) -> Optional[Dict]:
+    def _fetch_url(self, url: str) -> dict[str, Any] | None:
         """Fetch URL and return JSON data."""
         try:
             with urllib.request.urlopen(url, timeout=10) as response:
@@ -118,7 +138,7 @@ class SonarCloudClient:
         except Exception:
             return None
 
-    def guess_project_key(self, owner: str, repo: str) -> List[str]:
+    def guess_project_key(self, owner: str, repo: str) -> list[str]:
         """Generate possible SonarCloud project keys."""
         org = self.config.get_sonarcloud_org()
         patterns = [
@@ -128,10 +148,12 @@ class SonarCloudClient:
         ]
 
         if org:
-            patterns.extend([
-                f"{org}_{repo}",
-                f"{org}:{repo}",
-            ])
+            patterns.extend(
+                [
+                    f"{org}_{repo}",
+                    f"{org}:{repo}",
+                ]
+            )
 
         return patterns
 
@@ -139,9 +161,9 @@ class SonarCloudClient:
 async def fetch_all_repos(
     config: Config,
     check_sonar: bool = False,
-    progress_callback=None,
-    limit: int = 0
-) -> List[RepoOverview]:
+    progress_callback: ProgressCallback | None = None,
+    limit: int = 0,
+) -> list[RepoOverview]:
     """Fetch all repository data asynchronously.
 
     Args:
@@ -154,12 +176,10 @@ async def fetch_all_repos(
     sonar = SonarCloudClient(config)
 
     repos = await github.get_user_repos()
-    overviews = []
+    overviews: list[RepoOverview] = []
 
-    # Filter excluded repos first for accurate count
     repos = [r for r in repos if not config.is_excluded(r["name"])]
 
-    # Debug limit
     if limit > 0:
         repos = repos[:limit]
 
@@ -172,12 +192,10 @@ async def fetch_all_repos(
         if progress_callback:
             await progress_callback(i + 1, total, repo_name)
 
-        # Get issues
-        issues = []
+        issues: list[Issue] = []
         if repo_data.get("hasIssuesEnabled", True):
             issues = await github.get_repo_issues(owner, repo_name)
 
-        # Get SonarCloud status if requested
         sonar_status = None
         if check_sonar:
             project_keys = sonar.guess_project_key(owner, repo_name)
@@ -186,17 +204,18 @@ async def fetch_all_repos(
                 if sonar_status:
                     break
 
-        # Check local path
         local_path = github.get_local_repo_path(repo_name)
 
-        overviews.append(RepoOverview(
-            name=repo_name,
-            owner=owner,
-            url=repo_data["url"],
-            open_issues_count=len(issues),
-            issues=issues,
-            sonar_status=sonar_status,
-            local_path=str(local_path) if local_path else None
-        ))
+        overviews.append(
+            RepoOverview(
+                name=repo_name,
+                owner=owner,
+                url=repo_data["url"],
+                open_issues_count=len(issues),
+                issues=issues,
+                sonar_status=sonar_status,
+                local_path=str(local_path) if local_path else None,
+            )
+        )
 
     return overviews
