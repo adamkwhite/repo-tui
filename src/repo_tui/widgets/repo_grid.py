@@ -20,8 +20,9 @@ class RepoCard(Static):
         self.repo = repo
         self.add_class("repo-card")
         self.can_focus = True
+        self.update(self._build_content())
 
-    def render(self) -> str:
+    def _build_content(self) -> str:
         """Render the card content."""
         repo = self.repo
 
