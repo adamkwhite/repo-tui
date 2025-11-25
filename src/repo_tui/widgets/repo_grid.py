@@ -16,11 +16,11 @@ class RepoCard(Static):
     """A single repository card in the grid."""
 
     def __init__(self, repo: RepoOverview) -> None:
-        super().__init__()
         self.repo = repo
+        content = self._build_content()
+        super().__init__(content)
         self.add_class("repo-card")
         self.can_focus = True
-        self.update(self._build_content())
 
     def _build_content(self) -> str:
         """Render the card content."""
