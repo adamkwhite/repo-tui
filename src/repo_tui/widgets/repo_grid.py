@@ -77,19 +77,21 @@ class RepoCard(Static):
         elif total_items == 0:
             activity = "🟢"
 
-        # Build card content - compact and always visible
+        # Build card content - always show name prominently
         lines = [
-            f"[bold]{repo.name}[/bold]",
+            "",  # Top padding
+            f"[bold white]{repo.name}[/bold white]",
             "",
         ]
 
+        # Tags (if any)
         if tags_line:
             lines.append(tags_line)
+            lines.append("")
 
-        lines.extend([
-            counts,
-            git_status,
-        ])
+        # Always show counts and git status
+        lines.append(counts)
+        lines.append(git_status)
 
         # Bottom line: sonar and/or activity
         bottom_parts = []
@@ -97,6 +99,7 @@ class RepoCard(Static):
             bottom_parts.append(sonar_info)
         if activity:
             bottom_parts.append(activity)
+
         if bottom_parts:
             lines.append("")
             lines.append(" ".join(bottom_parts))
