@@ -165,7 +165,12 @@ class GitHubClient:
                 ))
 
             return result
-        except Exception:
+        except Exception as e:
+            # Debug: log the error
+            import sys
+            print(f"ERROR fetching PRs for {owner}/{repo}: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
             return []
 
     def get_local_repo_path(self, repo_name: str) -> Path | None:
