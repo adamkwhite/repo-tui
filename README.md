@@ -98,7 +98,7 @@ sonar_token_pass: null  # Pass path (e.g., work/sonarqube) - recommended
 claude_command: claude  # Claude CLI command or full path
 
 # Debug settings
-debug_sonar: false  # Enable debug logging for sonar checks (/tmp/sonar-*.log)
+debug: false  # Enable debug logging (/tmp/sonar-*.log, /tmp/claude-launch-debug.log)
 ```
 
 Or use JSON format (`~/.repo-overview.json`):
@@ -114,7 +114,7 @@ Or use JSON format (`~/.repo-overview.json`):
   "sonar_token": null,
   "sonar_token_pass": null,
   "claude_command": "claude",
-  "debug_sonar": false
+  "debug": false
 }
 ```
 
@@ -150,9 +150,11 @@ Or use JSON format (`~/.repo-overview.json`):
   - Example: `"claude"` (if in PATH) or `"/home/user/.claude/local/claude"` (full path)
   - Useful for machines with different Claude aliases or non-standard installations
 
-- **`debug_sonar`**: Enable debug logging for SonarQube checks
-  - Set to `true` to log all sonar API calls to `/tmp/sonar-check-debug.log` and `/tmp/sonar-fetch-debug.log`
-  - Useful for troubleshooting sonar integration issues
+- **`debug`**: Enable debug logging for troubleshooting
+  - Set to `true` to enable detailed logging:
+    - SonarQube API calls: `/tmp/sonar-check-debug.log` and `/tmp/sonar-fetch-debug.log`
+    - Claude launcher: `/tmp/claude-launch-debug.log`
+  - Useful for troubleshooting integration issues
   - Default: `false`
 
 ### Example Configurations

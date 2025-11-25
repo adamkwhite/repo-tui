@@ -896,6 +896,7 @@ class RepoOverviewApp(App[None]):
     async def action_open_browser(self) -> None:
         """Open selected item in browser."""
         current_widget = self._get_current_widget()
+        status_bar = self.query_one(StatusBar)
 
         url = None
         inline = current_widget.get_selected_inline_issue()
@@ -907,11 +908,16 @@ class RepoOverviewApp(App[None]):
                 url = repo.url
 
         if url:
-            subprocess.Popen(
-                ["wslview", url],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            try:
+                # Use cmd.exe to open URL in Windows default browser from WSL
+                subprocess.Popen(
+                    ["cmd.exe", "/c", "start", url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                status_bar.update(f"Opening in browser...")
+            except Exception as e:
+                status_bar.update(f"Error opening browser: {e}")
 
     async def action_toggle_expand(self) -> None:
         """Toggle expand/collapse for selected repo (list view only)."""

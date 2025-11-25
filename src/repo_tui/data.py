@@ -322,19 +322,19 @@ class SonarCloudClient:
                 request.add_header("Authorization", f"Basic {credentials}")
 
             # Debug logging (if enabled)
-            if self.config.data.get("debug_sonar", False):
+            if self.config.data.get("debug", False):
                 with open("/tmp/sonar-fetch-debug.log", "a") as f:
                     f.write(f"\nFetching: {url}\n")
                     f.write(f"Has token: {bool(self.token)}\n")
 
             with urllib.request.urlopen(request, timeout=10) as response:
                 data = json.loads(response.read().decode())
-                if self.config.data.get("debug_sonar", False):
+                if self.config.data.get("debug", False):
                     with open("/tmp/sonar-fetch-debug.log", "a") as f:
                         f.write(f"Success: {data}\n")
                 return data
         except Exception as e:
-            if self.config.data.get("debug_sonar", False):
+            if self.config.data.get("debug", False):
                 with open("/tmp/sonar-fetch-debug.log", "a") as f:
                     f.write(f"Error: {e}\n")
             return None
@@ -416,21 +416,21 @@ async def fetch_all_repos(
         if check_sonar:
             project_keys = sonar.guess_project_key(owner, repo_name)
             # Debug logging (if enabled)
-            if config.data.get("debug_sonar", False):
+            if config.data.get("debug", False):
                 with open("/tmp/sonar-check-debug.log", "a") as f:
                     f.write(f"\n=== Checking sonar for {repo_name} ===\n")
                     f.write(f"Project keys to try: {project_keys}\n")
 
             for project_key in project_keys:
                 sonar_status = await sonar.get_project_status(project_key)
-                if config.data.get("debug_sonar", False):
+                if config.data.get("debug", False):
                     with open("/tmp/sonar-check-debug.log", "a") as f:
                         f.write(f"Tried {project_key}: {sonar_status}\n")
                 if sonar_status:
                     break
             sonar_checked = True
 
-            if config.data.get("debug_sonar", False):
+            if config.data.get("debug", False):
                 with open("/tmp/sonar-check-debug.log", "a") as f:
                     f.write(f"Final: checked={sonar_checked}, status={sonar_status}\n")
 
