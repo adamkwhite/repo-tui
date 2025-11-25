@@ -88,6 +88,11 @@ github_org: null
 
 # Local directory where repos are cloned
 local_code_path: ~/Code
+
+# Self-hosted SonarQube (optional)
+sonar_url: null  # e.g., https://sonar.company.com
+sonar_token: null  # Direct token (not recommended for security)
+sonar_token_pass: null  # Pass path (e.g., work/sonarqube) - recommended
 ```
 
 Or use JSON format (`~/.repo-overview.json`):
@@ -98,7 +103,10 @@ Or use JSON format (`~/.repo-overview.json`):
   "excluded_repos": [],
   "sonarcloud_org": null,
   "github_org": null,
-  "local_code_path": "~/Code"
+  "local_code_path": "~/Code",
+  "sonar_url": null,
+  "sonar_token": null,
+  "sonar_token_pass": null
 }
 ```
 
@@ -120,6 +128,15 @@ Or use JSON format (`~/.repo-overview.json`):
 
 - **`local_code_path`**: Where your repos are cloned locally (used for git status checks)
   - Example: `"~/code"` or `"~/workspace"`
+
+- **`sonar_url`**: Self-hosted SonarQube URL (leave as `null` for public SonarCloud)
+  - Example: `"https://sonar.company.com"`
+
+- **`sonar_token`**: SonarQube authentication token (not recommended - use `sonar_token_pass` instead)
+
+- **`sonar_token_pass`**: Path to token in `pass` password manager (recommended for security)
+  - Example: `"work/sonarqube"`
+  - Token will be retrieved via `pass work/sonarqube` command
 
 ### Example Configurations
 

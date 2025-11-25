@@ -264,17 +264,26 @@ class GitHubClient:
 
 
 class SonarCloudClient:
-    """SonarCloud API client for public projects."""
-
-    BASE_URL = "https://sonarcloud.io/api"
+    """SonarCloud/SonarQube API client."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        # Use configured URL or default to public SonarCloud
+        sonar_url = config.data.get("sonar_url")
+        if sonar_url:
+            # Self-hosted SonarQube
+            self.base_url = f"{sonar_url.rstrip('/')}/api"
+        else:
+            # Public SonarCloud
+            self.base_url = "https://sonarcloud.io/api"
+
+        # Get token from config or pass
+        self.token = config.get_sonar_token()
 
     async def get_project_status(self, project_key: str) -> SonarStatus | None:
         """Get quality gate status for a project."""
         try:
-            url = f"{self.BASE_URL}/qualitygates/project_status?projectKey={urllib.parse.quote(project_key)}"
+            url = f"{self.base_url}/qualitygates/project_status?projectKey={urllib.parse.quote(project_key)}"
 
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(None, self._fetch_url, url)
@@ -283,10 +292,18 @@ class SonarCloudClient:
                 return None
 
             project_status = data.get("projectStatus", {})
+
+            # Build dashboard URL
+            sonar_url = self.config.data.get("sonar_url")
+            if sonar_url:
+                dashboard_url = f"{sonar_url.rstrip('/')}/dashboard?id={urllib.parse.quote(project_key)}"
+            else:
+                dashboard_url = f"https://sonarcloud.io/dashboard?id={urllib.parse.quote(project_key)}"
+
             return SonarStatus(
                 project_key=project_key,
                 status=project_status.get("status", "NONE"),
-                url=f"https://sonarcloud.io/dashboard?id={urllib.parse.quote(project_key)}",
+                url=dashboard_url,
                 conditions=project_status.get("conditions", []),
             )
         except Exception:
@@ -295,7 +312,16 @@ class SonarCloudClient:
     def _fetch_url(self, url: str) -> dict[str, Any] | None:
         """Fetch URL and return JSON data."""
         try:
-            with urllib.request.urlopen(url, timeout=10) as response:
+            request = urllib.request.Request(url)
+
+            # Add authentication header if token is provided
+            if self.token:
+                # SonarQube uses Basic auth with token as username and empty password
+                import base64
+                credentials = base64.b64encode(f"{self.token}:".encode()).decode()
+                request.add_header("Authorization", f"Basic {credentials}")
+
+            with urllib.request.urlopen(request, timeout=10) as response:
                 return json.loads(response.read().decode())
         except Exception:
             return None

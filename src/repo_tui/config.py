@@ -44,6 +44,9 @@ class Config:
             "sonarcloud_org": None,
             "github_org": None,
             "local_code_path": "~/Code",
+            "sonar_url": None,  # Self-hosted SonarQube URL (e.g., https://sonar.company.com)
+            "sonar_token": None,  # SonarQube authentication token (direct)
+            "sonar_token_pass": None,  # SonarQube token from pass (e.g., "work/sonarqube")
         }
         self._save_config(default_config)
         return default_config
@@ -82,3 +85,27 @@ class Config:
     def get_local_code_path(self) -> Path:
         """Get the local code directory path."""
         return Path(self.data.get("local_code_path", "~/Code")).expanduser()
+
+    def get_sonar_token(self) -> str | None:
+        """Get SonarQube token from config or pass."""
+        # Try direct token first
+        token = self.data.get("sonar_token")
+        if token:
+            return token
+
+        # Try fetching from pass
+        pass_path = self.data.get("sonar_token_pass")
+        if pass_path:
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["pass", pass_path],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                return result.stdout.strip()
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                return None
+
+        return None
