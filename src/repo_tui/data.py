@@ -144,13 +144,20 @@ class GitHubClient:
                 reviewers = [r.get("login") for r in pr.get("reviewRequests", []) if r.get("login")]
 
                 # Extract checks status
-                checks_rollup = pr.get("statusCheckRollup", {})
+                checks_rollup = pr.get("statusCheckRollup")
                 checks_status = None
                 if checks_rollup:
-                    contexts = checks_rollup.get("contexts", [])
+                    # statusCheckRollup can be either a dict with "contexts" or a list of contexts
+                    if isinstance(checks_rollup, dict):
+                        contexts = checks_rollup.get("contexts", [])
+                    elif isinstance(checks_rollup, list):
+                        contexts = checks_rollup
+                    else:
+                        contexts = []
+
                     if contexts:
                         # Determine overall status
-                        statuses = [c.get("state") or c.get("conclusion") for c in contexts]
+                        statuses = [c.get("state") or c.get("conclusion") for c in contexts if isinstance(c, dict)]
                         if any(s in ["FAILURE", "failure", "TIMED_OUT"] for s in statuses):
                             checks_status = "FAILURE"
                         elif any(s in ["PENDING", "pending", "IN_PROGRESS"] for s in statuses):
