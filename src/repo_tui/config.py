@@ -6,19 +6,37 @@ import json
 from pathlib import Path
 from typing import Any
 
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
 
 class Config:
     """Configuration management."""
 
-    def __init__(self, config_path: str = "~/.repo-overview.json") -> None:
-        self.config_path = Path(config_path).expanduser()
+    def __init__(self, config_path: str | None = None) -> None:
+        # Check for YAML config first (if pyyaml installed), then JSON
+        if config_path:
+            self.config_path = Path(config_path).expanduser()
+        elif HAS_YAML and Path("~/.repo-overview.yaml").expanduser().exists():
+            self.config_path = Path("~/.repo-overview.yaml").expanduser()
+        else:
+            self.config_path = Path("~/.repo-overview.json").expanduser()
+
         self.data = self._load_config()
 
     def _load_config(self) -> dict[str, Any]:
-        """Load configuration from file or create default."""
+        """Load configuration from YAML or JSON file or create default."""
         if self.config_path.exists():
             with open(self.config_path) as f:
-                return json.load(f)
+                if self.config_path.suffix in ['.yaml', '.yml']:
+                    if not HAS_YAML:
+                        raise ImportError("pyyaml is required for YAML config. Install with: pip install pyyaml")
+                    return yaml.safe_load(f) or {}
+                else:
+                    return json.load(f)
 
         default_config: dict[str, Any] = {
             "included_repos": [],  # If set, ONLY show these repos (whitelist)

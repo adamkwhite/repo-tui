@@ -71,7 +71,26 @@ python -m repo_tui.app
 
 ## Configuration
 
-Create `~/.repo-overview.json` in your home directory:
+Create `~/.repo-overview.yaml` in your home directory (YAML format recommended for comments):
+
+```yaml
+# Repos to include (whitelist mode - if set, ONLY these repos are shown)
+included_repos: []
+
+# Repos to exclude (blacklist mode - only used if included_repos is empty)
+excluded_repos: []
+
+# SonarCloud organization (optional)
+sonarcloud_org: null
+
+# GitHub organization to fetch repos from (instead of personal repos)
+github_org: null
+
+# Local directory where repos are cloned
+local_code_path: ~/Code
+```
+
+Or use JSON format (`~/.repo-overview.json`):
 
 ```json
 {
@@ -105,25 +124,41 @@ Create `~/.repo-overview.json` in your home directory:
 ### Example Configurations
 
 **Personal repos:**
-```json
-{
-  "included_repos": [],
-  "excluded_repos": ["old-fork", "archived-project"],
-  "sonarcloud_org": null,
-  "github_org": null,
-  "local_code_path": "~/Code"
-}
+```yaml
+included_repos: []
+excluded_repos:
+  - old-fork
+  - archived-project
+sonarcloud_org: null
+github_org: null
+local_code_path: ~/Code
 ```
 
-**Organization repos (filtered):**
-```json
-{
-  "included_repos": ["api-service", "web-app", "mobile-app"],
-  "excluded_repos": [],
-  "sonarcloud_org": "my-company",
-  "github_org": "my-company",
-  "local_code_path": "~/work/projects"
-}
+**Organization repos (grouped by feature with comments):**
+```yaml
+included_repos:
+  # Authentication & Security
+  - auth-service
+  - user-management
+
+  # API Services
+  - api-gateway
+  - customer-api
+  - inventory-api
+
+  # Frontend Applications
+  - web-app
+  - mobile-app
+  - admin-portal
+
+  # Infrastructure
+  - terraform-configs
+  - k8s-manifests
+
+excluded_repos: []
+sonarcloud_org: my-company
+github_org: my-company
+local_code_path: ~/work/projects
 ```
 
 ## License
