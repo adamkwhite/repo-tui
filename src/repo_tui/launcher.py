@@ -5,8 +5,12 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .models import Issue, PullRequest, RepoOverview
+
+if TYPE_CHECKING:
+    from .config import Config
 
 
 def reset_terminal_modes() -> None:
@@ -28,7 +32,12 @@ def build_claude_prompt(issue: Issue | None = None, pr: PullRequest | None = Non
     return "/StartOfTheDay"
 
 
-def build_wt_command(repo: RepoOverview, issue: Issue | None = None, pr: PullRequest | None = None) -> list[str]:
+def build_wt_command(
+    repo: RepoOverview,
+    claude_command: str,
+    issue: Issue | None = None,
+    pr: PullRequest | None = None,
+) -> list[str]:
     r"""Build Windows Terminal command to launch Claude Code.
 
     Command structure:
@@ -44,7 +53,7 @@ def build_wt_command(repo: RepoOverview, issue: Issue | None = None, pr: PullReq
     # Escape single quotes in prompt for bash
     escaped_prompt = prompt.replace("'", "'\\''")
 
-    # Build command - use full path to claude since PATH may not be set
+    # Build command - use configured claude command
     # Wrap in bash -c with 'reset' to clear any inherited terminal state
     return [
         "wt.exe",
@@ -62,11 +71,16 @@ def build_wt_command(repo: RepoOverview, issue: Issue | None = None, pr: PullReq
         "--",
         "bash",
         "-c",
-        f"reset && /home/adam/.claude/local/claude '{escaped_prompt}'",
+        f"reset && {claude_command} '{escaped_prompt}'",
     ]
 
 
-def launch_claude(repo: RepoOverview, issue: Issue | None = None, pr: PullRequest | None = None) -> str:
+def launch_claude(
+    repo: RepoOverview,
+    config: Config,
+    issue: Issue | None = None,
+    pr: PullRequest | None = None,
+) -> str:
     """Launch Claude Code in a new Windows Terminal tab.
 
     Returns a status message.
@@ -75,7 +89,9 @@ def launch_claude(repo: RepoOverview, issue: Issue | None = None, pr: PullReques
         return f"Repo not found locally: ~/Code/{repo.name}"
 
     try:
-        cmd = build_wt_command(repo, issue, pr)
+        # Get claude command from config, default to "claude"
+        claude_command = config.data.get("claude_command", "claude")
+        cmd = build_wt_command(repo, claude_command, issue, pr)
 
         subprocess.Popen(
             cmd,

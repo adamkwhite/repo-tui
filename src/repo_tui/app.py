@@ -886,7 +886,7 @@ class RepoOverviewApp(App[None]):
         await self.push_screen(loading_screen)
 
         await asyncio.sleep(0.1)
-        result = launch_claude(selected_repo, selected_issue, selected_pr)
+        result = launch_claude(selected_repo, self.config, selected_issue, selected_pr)
 
         await asyncio.sleep(1.5)
         self.pop_screen()

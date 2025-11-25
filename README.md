@@ -93,6 +93,9 @@ local_code_path: ~/Code
 sonar_url: null  # e.g., https://sonar.company.com
 sonar_token: null  # Direct token (not recommended for security)
 sonar_token_pass: null  # Pass path (e.g., work/sonarqube) - recommended
+
+# Claude Code launcher
+claude_command: claude  # Claude CLI command or full path
 ```
 
 Or use JSON format (`~/.repo-overview.json`):
@@ -106,7 +109,8 @@ Or use JSON format (`~/.repo-overview.json`):
   "local_code_path": "~/Code",
   "sonar_url": null,
   "sonar_token": null,
-  "sonar_token_pass": null
+  "sonar_token_pass": null,
+  "claude_command": "claude"
 }
 ```
 
@@ -137,6 +141,10 @@ Or use JSON format (`~/.repo-overview.json`):
 - **`sonar_token_pass`**: Path to token in `pass` password manager (recommended for security)
   - Example: `"work/sonarqube"`
   - Token will be retrieved via `pass work/sonarqube` command
+
+- **`claude_command`**: Command to launch Claude Code (used when pressing `c` key)
+  - Example: `"claude"` (if in PATH) or `"/home/user/.claude/local/claude"` (full path)
+  - Useful for machines with different Claude aliases or non-standard installations
 
 ### Example Configurations
 

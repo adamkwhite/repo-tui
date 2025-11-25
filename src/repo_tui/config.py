@@ -47,6 +47,7 @@ class Config:
             "sonar_url": None,  # Self-hosted SonarQube URL (e.g., https://sonar.company.com)
             "sonar_token": None,  # SonarQube authentication token (direct)
             "sonar_token_pass": None,  # SonarQube token from pass (e.g., "work/sonarqube")
+            "claude_command": "claude",  # Claude CLI command (e.g., "claude" or full path)
         }
         self._save_config(default_config)
         return default_config
