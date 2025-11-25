@@ -815,9 +815,42 @@ class RepoOverviewApp(App[None]):
             self.pop_screen()
 
     async def action_sonar_all(self) -> None:
-        """Toggle SonarCloud checking and refresh all repos."""
-        self.check_sonar = not self.check_sonar
-        await self.action_refresh_all()
+        """Check SonarCloud status for all repos."""
+        loading_screen = LoadingScreen("Checking Sonar for all repos...")
+        self.push_screen(loading_screen)
+
+        await asyncio.sleep(0.1)
+
+        try:
+            from .data import SonarCloudClient
+            sonar = SonarCloudClient(self.config)
+
+            total = len(self.repos)
+            for i, repo in enumerate(self.repos):
+                loading_screen.update_message(f"Checking {i + 1}/{total}", repo.name)
+
+                # Try to find sonar project
+                project_keys = sonar.guess_project_key(repo.owner, repo.name)
+                for project_key in project_keys:
+                    sonar_status = await sonar.get_project_status(project_key)
+                    if sonar_status:
+                        repo.sonar_status = sonar_status
+                        repo.sonar_checked = True
+                        break
+                else:
+                    # No sonar project found
+                    repo.sonar_checked = True
+                    repo.sonar_status = None
+
+            # Update the display
+            current_widget = self._get_current_widget()
+            current_widget.set_repos(self.repos)
+
+            status_bar = self.query_one(StatusBar)
+            total_issues = sum(r.open_issues_count for r in self.repos)
+            status_bar.update_stats(len(self.repos), total_issues, "Sonar checked all repos")
+        finally:
+            self.pop_screen()
 
     async def action_launch(self) -> None:
         """Launch Claude Code for selected repo/issue/PR."""
