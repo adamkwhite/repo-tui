@@ -48,6 +48,7 @@ class Config:
             "sonar_token": None,  # SonarQube authentication token (direct)
             "sonar_token_pass": None,  # SonarQube token from pass (e.g., "work/sonarqube")
             "claude_command": "claude",  # Claude CLI command (e.g., "claude" or full path)
+            "debug_sonar": False,  # Enable debug logging for sonar checks
         }
         self._save_config(default_config)
         return default_config
