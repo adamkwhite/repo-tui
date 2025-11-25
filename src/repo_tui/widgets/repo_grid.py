@@ -160,11 +160,25 @@ class RepoGridWidget(VerticalScroll):
         # Sort repos (same logic as list view)
         sorted_repos = sorted(repos, key=self._get_priority, reverse=True)
 
+        # Debug: log to file
+        with open("/tmp/grid_debug.log", "a") as f:
+            f.write(f"\n=== set_repos called ===\n")
+            f.write(f"Total repos: {len(sorted_repos)}\n")
+            for i, repo in enumerate(sorted_repos[:10]):
+                f.write(f"  {i}: {repo.name} - issues:{repo.open_issues_count} branch:{repo.current_branch}\n")
+
         # Create cards
-        for repo in sorted_repos:
-            card = RepoCard(repo)
-            grid.mount(card)
-            self._cards.append(card)
+        for i, repo in enumerate(sorted_repos):
+            try:
+                card = RepoCard(repo)
+                grid.mount(card)
+                self._cards.append(card)
+            except Exception as e:
+                with open("/tmp/grid_debug.log", "a") as f:
+                    f.write(f"ERROR creating card for {repo.name}: {e}\n")
+
+        with open("/tmp/grid_debug.log", "a") as f:
+            f.write(f"Created {len(self._cards)} cards successfully\n")
 
         # Focus first card if any
         if self._cards:

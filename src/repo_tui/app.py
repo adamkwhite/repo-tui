@@ -575,17 +575,21 @@ class RepoOverviewApp(App[None]):
 
     def _get_current_widget(self):
         """Get the current view widget (list or grid)."""
-        if self.view_mode == "list":
-            return self.query_one("#repo-list", RepoListWidget)
-        else:
-            return self.query_one("#repo-grid", RepoGridWidget)
+        try:
+            if self.view_mode == "list":
+                return self.query_one("#repo-list", RepoListWidget)
+            else:
+                return self.query_one("#repo-grid", RepoGridWidget)
+        except Exception as e:
+            # Widget might not exist during transition
+            return None
 
     async def action_switch_view_list(self) -> None:
         """Switch to list view."""
         if self.view_mode != "list":
             # Remember selected repo
             current_widget = self._get_current_widget()
-            selected_repo = current_widget.get_selected_repo()
+            selected_repo = current_widget.get_selected_repo() if current_widget else None
 
             # Switch view mode
             self.view_mode = "list"
@@ -593,16 +597,15 @@ class RepoOverviewApp(App[None]):
 
             # Restore data
             new_widget = self._get_current_widget()
-            new_widget.set_repos(self.repos)
-
-            # TODO: Re-select same repo if possible
+            if new_widget:
+                new_widget.set_repos(self.repos)
 
     async def action_switch_view_grid(self) -> None:
         """Switch to grid view."""
         if self.view_mode != "grid":
             # Remember selected repo
             current_widget = self._get_current_widget()
-            selected_repo = current_widget.get_selected_repo()
+            selected_repo = current_widget.get_selected_repo() if current_widget else None
 
             # Switch view mode
             self.view_mode = "grid"
@@ -610,14 +613,16 @@ class RepoOverviewApp(App[None]):
 
             # Restore data
             new_widget = self._get_current_widget()
-            new_widget.set_repos(self.repos)
-
-            # TODO: Re-select same repo if possible
+            if new_widget:
+                new_widget.set_repos(self.repos)
 
     async def action_refresh_repo(self) -> None:
         """Refresh the currently selected repository."""
         current_widget = self._get_current_widget()
         status_bar = self.query_one(StatusBar)
+
+        if not current_widget:
+            return
 
         selected_repo = current_widget.get_selected_repo()
         if not selected_repo:
@@ -780,24 +785,28 @@ class RepoOverviewApp(App[None]):
     async def action_cursor_down(self) -> None:
         """Move cursor down in current widget."""
         current_widget = self._get_current_widget()
-        current_widget.action_cursor_down()
+        if current_widget:
+            current_widget.action_cursor_down()
 
     async def action_cursor_up(self) -> None:
         """Move cursor up in current widget."""
         current_widget = self._get_current_widget()
-        current_widget.action_cursor_up()
+        if current_widget:
+            current_widget.action_cursor_up()
 
     async def action_cursor_left(self) -> None:
         """Move cursor left in current widget (grid only)."""
         if self.view_mode == "grid":
             current_widget = self._get_current_widget()
-            current_widget.action_cursor_left()
+            if current_widget:
+                current_widget.action_cursor_left()
 
     async def action_cursor_right(self) -> None:
         """Move cursor right in current widget (grid only)."""
         if self.view_mode == "grid":
             current_widget = self._get_current_widget()
-            current_widget.action_cursor_right()
+            if current_widget:
+                current_widget.action_cursor_right()
 
     async def action_expand_issue(self) -> None:
         """Show full issue or PR details in a modal."""
