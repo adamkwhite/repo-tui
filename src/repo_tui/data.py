@@ -397,15 +397,26 @@ async def fetch_all_repos(
         if local_path:
             has_uncommitted, current_branch = await github.get_git_status(local_path)
 
+        # Check SonarCloud status if enabled
+        sonar_status = None
+        sonar_checked = False
+        if check_sonar:
+            project_keys = sonar.guess_project_key(owner, repo_name)
+            for project_key in project_keys:
+                sonar_status = await sonar.get_project_status(project_key)
+                if sonar_status:
+                    break
+            sonar_checked = True
+
         return RepoOverview(
             name=repo_name,
             owner=owner,
             url=repo_data["url"],
             open_issues_count=len(issues),
             issues=issues,
-            sonar_status=None,
+            sonar_status=sonar_status,
             local_path=str(local_path) if local_path else None,
-            sonar_checked=False,
+            sonar_checked=sonar_checked,
             language=language,
             topics=topics,
             pull_requests=pull_requests,
