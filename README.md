@@ -25,25 +25,31 @@ Terminal UI for GitHub repository overview with SonarCloud integration.
 
 ```bash
 # Clone the repo
-git clone https://github.com/adamhl8/repo-tui.git
+git clone https://github.com/adamkwhite/repo-tui.git
 cd repo-tui
 
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# Install in development mode
-pip install -e ".[dev]"
+# Install dependencies
+pip install -r requirements.txt
+
+# Authenticate with GitHub
+gh auth login
 ```
 
 ## Usage
 
 ```bash
 # Run the TUI
-repo-tui
+./run.sh
 
 # Or run directly
 python -m repo_tui.app
+
+# Development mode with hot reload
+./dev.sh
 ```
 
 ## Keybindings
@@ -65,20 +71,59 @@ python -m repo_tui.app
 
 ## Configuration
 
-Create `~/.config/repo-tui/config.toml`:
+Create `~/.repo-overview.json` in your home directory:
 
-```toml
-[github]
-# Repos to exclude from list
-excluded_repos = ["old-project", "fork-i-dont-care-about"]
+```json
+{
+  "included_repos": [],
+  "excluded_repos": [],
+  "sonarcloud_org": null,
+  "github_org": null,
+  "local_code_path": "~/Code"
+}
+```
 
-[sonarcloud]
-# Your SonarCloud organization
-organization = "your-org"
+### Configuration Options
 
-[local]
-# Where your repos are cloned locally
-code_path = "/home/username/Code"
+- **`included_repos`**: Whitelist mode - if set, ONLY show these repos (useful for large organizations with 100+ repos)
+  - Example: `["repo1", "repo2", "repo3"]`
+  - Leave empty `[]` to show all repos (except those in `excluded_repos`)
+
+- **`excluded_repos`**: Blacklist mode - hide specific repos (only used when `included_repos` is empty)
+  - Example: `["archived-project", "test-repo"]`
+
+- **`github_org`**: Fetch repos from a specific GitHub organization instead of personal repos
+  - Example: `"my-company"`
+  - Leave as `null` to fetch your personal repos
+
+- **`sonarcloud_org`**: SonarCloud organization name (optional, only needed with `-s` flag)
+  - Example: `"my-org"`
+
+- **`local_code_path`**: Where your repos are cloned locally (used for git status checks)
+  - Example: `"~/code"` or `"~/workspace"`
+
+### Example Configurations
+
+**Personal repos:**
+```json
+{
+  "included_repos": [],
+  "excluded_repos": ["old-fork", "archived-project"],
+  "sonarcloud_org": null,
+  "github_org": null,
+  "local_code_path": "~/Code"
+}
+```
+
+**Organization repos (filtered):**
+```json
+{
+  "included_repos": ["api-service", "web-app", "mobile-app"],
+  "excluded_repos": [],
+  "sonarcloud_org": "my-company",
+  "github_org": "my-company",
+  "local_code_path": "~/work/projects"
+}
 ```
 
 ## License
