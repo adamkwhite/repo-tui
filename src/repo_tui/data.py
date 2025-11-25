@@ -104,6 +104,10 @@ class GitHubClient:
 
     async def get_repo_prs(self, owner: str, repo: str) -> list[PullRequest]:
         """Get open pull requests for a repository."""
+        # Debug: log that we're fetching
+        with open("/tmp/pr-fetch-debug.log", "a") as f:
+            f.write(f"\n=== Fetching PRs for {owner}/{repo} ===\n")
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 "gh",
@@ -120,10 +124,19 @@ class GitHubClient:
             )
             stdout, _ = await proc.communicate()
 
+            with open("/tmp/pr-fetch-debug.log", "a") as f:
+                f.write(f"Return code: {proc.returncode}\n")
+                f.write(f"Stdout length: {len(stdout)}\n")
+
             if proc.returncode != 0:
+                with open("/tmp/pr-fetch-debug.log", "a") as f:
+                    f.write(f"Non-zero return code, returning empty\n")
                 return []
 
             prs_data = json.loads(stdout.decode())
+            with open("/tmp/pr-fetch-debug.log", "a") as f:
+                f.write(f"Parsed {len(prs_data)} PRs from JSON\n")
+
             result = []
 
             for pr in prs_data:
@@ -163,6 +176,9 @@ class GitHubClient:
                     mergeable=pr.get("mergeable"),
                     checks_status=checks_status,
                 ))
+
+            with open("/tmp/pr-fetch-debug.log", "a") as f:
+                f.write(f"Returning {len(result)} PRs\n")
 
             return result
         except Exception as e:
