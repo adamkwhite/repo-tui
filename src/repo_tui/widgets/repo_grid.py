@@ -131,8 +131,7 @@ class RepoGridWidget(VerticalScroll):
 
     def compose(self):
         """Compose the grid container."""
-        with Grid(id="repo-grid-container"):
-            pass
+        yield Grid(id="repo-grid-container")
 
     def set_repos(self, repos: list[RepoOverview]) -> None:
         """Set the repositories to display."""
