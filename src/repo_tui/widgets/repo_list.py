@@ -145,7 +145,8 @@ class RepoListWidget(OptionList):
     def _build_pr_option(self, repo: RepoOverview, pr: PullRequest) -> Option:
         """Build a rich option for a PR (indented under repo)."""
         draft = "[dim]draft[/dim] " if pr.draft else ""
-        text = Text.from_markup(f"    [green]PR #{pr.number}[/green] {draft}{pr.title}")
+        author = f"[dim]by {pr.author}[/dim] " if pr.author else ""
+        text = Text.from_markup(f"    [green]PR #{pr.number}[/green] {draft}{author}{pr.title}")
         return Option(text, id=f"pr:{repo.name}:{pr.number}")
 
     def _build_empty_option(self, repo: RepoOverview) -> Option:
