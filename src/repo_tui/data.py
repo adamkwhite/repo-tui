@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .config import Config
-from .models import Issue, RepoOverview, SonarStatus
+from .models import Issue, PullRequest, RepoOverview, SonarStatus
 
 if TYPE_CHECKING:
     pass
@@ -33,7 +33,7 @@ class GitHubClient:
                 "repo",
                 "list",
                 "--json",
-                "name,owner,url,hasIssuesEnabled",
+                "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description",
                 "--limit",
                 "1000",
                 stdout=asyncio.subprocess.PIPE,
@@ -93,12 +93,95 @@ class GitHubClient:
         except Exception:
             return []
 
+    async def get_repo_prs(self, owner: str, repo: str) -> list[PullRequest]:
+        """Get open pull requests for a repository."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                f"{owner}/{repo}",
+                "--json",
+                "number,title,url,author,state,isDraft,labels",
+                "--limit",
+                "100",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+
+            if proc.returncode != 0:
+                return []
+
+            prs_data = json.loads(stdout.decode())
+            return [
+                PullRequest(
+                    number=pr["number"],
+                    title=pr["title"],
+                    url=pr["url"],
+                    author=pr.get("author", {}).get("login", "unknown"),
+                    state=pr["state"],
+                    draft=pr.get("isDraft", False),
+                    labels=[label["name"] for label in pr.get("labels", [])],
+                )
+                for pr in prs_data
+            ]
+        except Exception:
+            return []
+
     def get_local_repo_path(self, repo_name: str) -> Path | None:
         """Check if repo exists locally and return path."""
         local_path = self.config.get_local_code_path() / repo_name
         if local_path.exists() and local_path.is_dir():
             return local_path
         return None
+
+    async def get_git_status(self, repo_path: Path) -> tuple[bool, str | None]:
+        """Check if repo has uncommitted changes and get current branch.
+
+        Returns:
+            tuple: (has_uncommitted_changes, current_branch)
+        """
+        try:
+            # Check for uncommitted changes
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo_path),
+                "status",
+                "--porcelain",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+
+            if proc.returncode != 0:
+                return (False, None)
+
+            has_changes = len(stdout.decode().strip()) > 0
+
+            # Get current branch
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo_path),
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+
+            if proc.returncode != 0:
+                return (has_changes, None)
+
+            current_branch = stdout.decode().strip()
+            return (has_changes, current_branch)
+
+        except Exception:
+            return (False, None)
 
 
 class SonarCloudClient:
@@ -185,37 +268,132 @@ async def fetch_all_repos(
 
     total = len(repos)
 
-    for i, repo_data in enumerate(repos):
+    # Parallel fetch: create tasks for all repos
+    async def fetch_repo_data(repo_data: dict[str, Any]) -> RepoOverview:
         repo_name = repo_data["name"]
         owner = repo_data["owner"]["login"]
 
-        if progress_callback:
-            await progress_callback(i + 1, total, repo_name)
+        # Fetch issues and PRs in parallel for this repo
+        issues_task = github.get_repo_issues(owner, repo_name) if repo_data.get("hasIssuesEnabled", True) else asyncio.sleep(0, result=[])
+        prs_task = github.get_repo_prs(owner, repo_name)
 
-        issues: list[Issue] = []
-        if repo_data.get("hasIssuesEnabled", True):
-            issues = await github.get_repo_issues(owner, repo_name)
-
-        sonar_status = None
-        if check_sonar:
-            project_keys = sonar.guess_project_key(owner, repo_name)
-            for project_key in project_keys:
-                sonar_status = await sonar.get_project_status(project_key)
-                if sonar_status:
-                    break
+        issues, pull_requests = await asyncio.gather(issues_task, prs_task)
 
         local_path = github.get_local_repo_path(repo_name)
+        primary_lang = repo_data.get("primaryLanguage")
+        language = primary_lang.get("name") if primary_lang else None
+        topics_data = repo_data.get("repositoryTopics", [])
+        topics = [t["name"] for t in topics_data] if topics_data else None
+        description = repo_data.get("description")
 
-        overviews.append(
-            RepoOverview(
-                name=repo_name,
-                owner=owner,
-                url=repo_data["url"],
-                open_issues_count=len(issues),
-                issues=issues,
-                sonar_status=sonar_status,
-                local_path=str(local_path) if local_path else None,
-            )
+        # Check git status if repo is local
+        has_uncommitted = False
+        current_branch = None
+        if local_path:
+            has_uncommitted, current_branch = await github.get_git_status(local_path)
+
+        return RepoOverview(
+            name=repo_name,
+            owner=owner,
+            url=repo_data["url"],
+            open_issues_count=len(issues),
+            issues=issues,
+            sonar_status=None,
+            local_path=str(local_path) if local_path else None,
+            sonar_checked=False,
+            language=language,
+            topics=topics,
+            pull_requests=pull_requests,
+            details_loaded=True,
+            has_uncommitted_changes=has_uncommitted,
+            current_branch=current_branch,
+            description=description,
         )
 
+    # Process in batches to avoid overwhelming the API
+    batch_size = 10
+    for i in range(0, total, batch_size):
+        batch = repos[i:i + batch_size]
+        if progress_callback:
+            await progress_callback(i + len(batch), total, f"batch {i // batch_size + 1}")
+
+        batch_results = await asyncio.gather(*[fetch_repo_data(r) for r in batch])
+        overviews.extend(batch_results)
+
     return overviews
+
+
+async def fetch_single_repo(
+    config: Config,
+    owner: str,
+    repo_name: str,
+    check_sonar: bool = False,
+) -> RepoOverview:
+    """Fetch data for a single repository.
+
+    Args:
+        config: Configuration object
+        owner: Repository owner
+        repo_name: Repository name
+        check_sonar: Whether to check SonarCloud status
+    """
+    github = GitHubClient(config)
+    sonar = SonarCloudClient(config)
+
+    issues = await github.get_repo_issues(owner, repo_name)
+    pull_requests = await github.get_repo_prs(owner, repo_name)
+
+    sonar_status = None
+    if check_sonar:
+        project_keys = sonar.guess_project_key(owner, repo_name)
+        for project_key in project_keys:
+            sonar_status = await sonar.get_project_status(project_key)
+            if sonar_status:
+                break
+
+    local_path = github.get_local_repo_path(repo_name)
+
+    # Check git status if repo is local
+    has_uncommitted = False
+    current_branch = None
+    if local_path:
+        has_uncommitted, current_branch = await github.get_git_status(local_path)
+
+    return RepoOverview(
+        name=repo_name,
+        owner=owner,
+        url=f"https://github.com/{owner}/{repo_name}",
+        open_issues_count=len(issues),
+        issues=issues,
+        sonar_status=sonar_status,
+        local_path=str(local_path) if local_path else None,
+        sonar_checked=check_sonar,
+        pull_requests=pull_requests,
+        details_loaded=True,
+        has_uncommitted_changes=has_uncommitted,
+        current_branch=current_branch,
+    )
+
+
+async def fetch_repo_details(
+    config: Config,
+    repo: RepoOverview,
+) -> None:
+    """Lazy-load issues and PRs for a repository (mutates repo in place).
+
+    Args:
+        config: Configuration object
+        repo: Repository to load details for
+    """
+    if repo.details_loaded:
+        return
+
+    github = GitHubClient(config)
+
+    issues = await github.get_repo_issues(repo.owner, repo.name)
+    pull_requests = await github.get_repo_prs(repo.owner, repo.name)
+
+    repo.issues = issues
+    repo.open_issues_count = len(issues)
+    repo.pull_requests = pull_requests
+    repo.details_loaded = True

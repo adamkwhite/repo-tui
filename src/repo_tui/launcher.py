@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .models import Issue, RepoOverview
+from .models import Issue, PullRequest, RepoOverview
 
 
 def reset_terminal_modes() -> None:
@@ -18,14 +18,17 @@ def reset_terminal_modes() -> None:
     sys.stdout.flush()
 
 
-def build_claude_prompt(issue: Issue | None = None) -> str:
+def build_claude_prompt(issue: Issue | None = None, pr: PullRequest | None = None) -> str:
     """Build the prompt string for Claude Code."""
+    if pr:
+        draft_status = " (DRAFT)" if pr.draft else ""
+        return f"Work on PR #{pr.number}{draft_status}: {pr.title}"
     if issue:
-        return f"/StartOfTheDay then work on issue #{issue.number}: {issue.title}"
+        return f"Work on issue #{issue.number}: {issue.title}"
     return "/StartOfTheDay"
 
 
-def build_wt_command(repo: RepoOverview, issue: Issue | None = None) -> list[str]:
+def build_wt_command(repo: RepoOverview, issue: Issue | None = None, pr: PullRequest | None = None) -> list[str]:
     r"""Build Windows Terminal command to launch Claude Code.
 
     Command structure:
@@ -33,7 +36,7 @@ def build_wt_command(repo: RepoOverview, issue: Issue | None = None) -> list[str
       -d "\\wsl$\Ubuntu\path\to\repo" \
       wsl.exe -d Ubuntu -- bash -c "reset && claude prompt"
     """
-    prompt = build_claude_prompt(issue)
+    prompt = build_claude_prompt(issue, pr)
 
     # WSL path for Windows Terminal (e.g., \\wsl$\Ubuntu\home\adam\Code\repo)
     wsl_path = repo.local_path.replace("/home/", r"\\wsl$\Ubuntu\home\\") if repo.local_path else ""
@@ -63,7 +66,7 @@ def build_wt_command(repo: RepoOverview, issue: Issue | None = None) -> list[str
     ]
 
 
-def launch_claude(repo: RepoOverview, issue: Issue | None = None) -> str:
+def launch_claude(repo: RepoOverview, issue: Issue | None = None, pr: PullRequest | None = None) -> str:
     """Launch Claude Code in a new Windows Terminal tab.
 
     Returns a status message.
@@ -72,7 +75,7 @@ def launch_claude(repo: RepoOverview, issue: Issue | None = None) -> str:
         return f"Repo not found locally: ~/Code/{repo.name}"
 
     try:
-        cmd = build_wt_command(repo, issue)
+        cmd = build_wt_command(repo, issue, pr)
 
         subprocess.Popen(
             cmd,
@@ -81,6 +84,8 @@ def launch_claude(repo: RepoOverview, issue: Issue | None = None) -> str:
             start_new_session=True,
         )
 
+        if pr:
+            return f"Launched Claude for {repo.name} PR #{pr.number}"
         if issue:
             return f"Launched Claude for {repo.name} #{issue.number}"
         return f"Launched Claude for {repo.name}"
