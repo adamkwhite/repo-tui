@@ -1025,7 +1025,13 @@ class RepoOverviewApp(App[None]):
 
 def main() -> None:
     """Entry point for the repo-tui command."""
-    app = RepoOverviewApp()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Terminal UI for GitHub repository overview")
+    parser.add_argument("-s", "--sonar", action="store_true", help="Check SonarCloud/SonarQube status on startup")
+    args = parser.parse_args()
+
+    app = RepoOverviewApp(check_sonar=args.sonar)
     app.run()
 
 
