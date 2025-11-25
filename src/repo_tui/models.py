@@ -29,6 +29,15 @@ class PullRequest:
     state: str
     draft: bool = False
     labels: list[str] | None = None
+    body: str = ""
+    reviewers: list[str] | None = None  # Requested reviewers
+    review_decision: str | None = None  # APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
+    head_ref: str | None = None  # Source branch
+    base_ref: str | None = None  # Target branch
+    created_at: str | None = None
+    updated_at: str | None = None
+    mergeable: str | None = None  # MERGEABLE, CONFLICTING, UNKNOWN
+    checks_status: str | None = None  # SUCCESS, FAILURE, PENDING
 
 
 @dataclass

@@ -112,7 +112,7 @@ class GitHubClient:
                 "--repo",
                 f"{owner}/{repo}",
                 "--json",
-                "number,title,url,author,state,isDraft,labels",
+                "number,title,url,author,state,isDraft,labels,body,reviewRequests,reviewDecision,headRefName,baseRefName,createdAt,updatedAt,mergeable,statusCheckRollup",
                 "--limit",
                 "100",
                 stdout=asyncio.subprocess.PIPE,
@@ -124,8 +124,28 @@ class GitHubClient:
                 return []
 
             prs_data = json.loads(stdout.decode())
-            return [
-                PullRequest(
+            result = []
+
+            for pr in prs_data:
+                # Extract reviewers
+                reviewers = [r.get("login") for r in pr.get("reviewRequests", []) if r.get("login")]
+
+                # Extract checks status
+                checks_rollup = pr.get("statusCheckRollup", {})
+                checks_status = None
+                if checks_rollup:
+                    contexts = checks_rollup.get("contexts", [])
+                    if contexts:
+                        # Determine overall status
+                        statuses = [c.get("state") or c.get("conclusion") for c in contexts]
+                        if any(s in ["FAILURE", "failure", "TIMED_OUT"] for s in statuses):
+                            checks_status = "FAILURE"
+                        elif any(s in ["PENDING", "pending", "IN_PROGRESS"] for s in statuses):
+                            checks_status = "PENDING"
+                        elif all(s in ["SUCCESS", "success"] for s in statuses if s):
+                            checks_status = "SUCCESS"
+
+                result.append(PullRequest(
                     number=pr["number"],
                     title=pr["title"],
                     url=pr["url"],
@@ -133,9 +153,18 @@ class GitHubClient:
                     state=pr["state"],
                     draft=pr.get("isDraft", False),
                     labels=[label["name"] for label in pr.get("labels", [])],
-                )
-                for pr in prs_data
-            ]
+                    body=pr.get("body", ""),
+                    reviewers=reviewers if reviewers else None,
+                    review_decision=pr.get("reviewDecision"),
+                    head_ref=pr.get("headRefName"),
+                    base_ref=pr.get("baseRefName"),
+                    created_at=pr.get("createdAt"),
+                    updated_at=pr.get("updatedAt"),
+                    mergeable=pr.get("mergeable"),
+                    checks_status=checks_status,
+                ))
+
+            return result
         except Exception:
             return []
 

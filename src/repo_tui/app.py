@@ -319,9 +319,9 @@ class PRDetailScreen(ModalScreen[int]):
     }
 
     #pr-detail-container {
-        width: 80%;
-        height: 60%;
-        max-width: 100;
+        width: 90%;
+        height: 80%;
+        max-width: 120;
         background: $surface;
         border: solid $primary;
         padding: 1 2;
@@ -342,9 +342,25 @@ class PRDetailScreen(ModalScreen[int]):
         height: auto;
     }
 
+    #pr-status {
+        height: auto;
+        margin-bottom: 1;
+    }
+
     #pr-labels {
         height: auto;
         margin-bottom: 1;
+    }
+
+    #pr-body-scroll {
+        height: 1fr;
+        border: solid $secondary;
+        padding: 1;
+        margin-bottom: 1;
+    }
+
+    #pr-body {
+        width: 100%;
     }
 
     #pr-footer {
@@ -373,7 +389,12 @@ class PRDetailScreen(ModalScreen[int]):
                 yield Static("", id="pr-title")
                 yield Static("", id="pr-meta")
 
+            yield Static("", id="pr-status")
             yield Static("", id="pr-labels")
+
+            with VerticalScroll(id="pr-body-scroll"):
+                yield Static("", id="pr-body")
+
             yield Static("[dim]h/l prev/next | Esc close[/dim]", id="pr-footer")
 
     def on_mount(self) -> None:
@@ -423,11 +444,54 @@ class PRDetailScreen(ModalScreen[int]):
         )
         self.query_one("#pr-title", Static).update(title_text)
 
-        # Meta
-        meta_parts = [f"Author: {pr.author}", f"State: {pr.state}"]
+        # Meta - author, dates, navigation
+        meta_parts = [f"by {pr.author}"]
+        if pr.created_at:
+            # Simple date formatting (just the date part)
+            created_date = pr.created_at.split("T")[0]
+            meta_parts.append(f"created {created_date}")
+        if pr.updated_at:
+            updated_date = pr.updated_at.split("T")[0]
+            meta_parts.append(f"updated {updated_date}")
         if self.pr_list:
             meta_parts.append(f"({self.current_index + 1}/{len(self.pr_list)})")
         self.query_one("#pr-meta", Static).update(" | ".join(meta_parts))
+
+        # Status section - branches, review, checks, merge status
+        status_parts = []
+
+        # Branch info
+        if pr.head_ref and pr.base_ref:
+            status_parts.append(f"[cyan]{pr.head_ref}[/cyan] → [cyan]{pr.base_ref}[/cyan]")
+
+        # Review decision
+        if pr.review_decision == "APPROVED":
+            status_parts.append("[green]✓ Approved[/green]")
+        elif pr.review_decision == "CHANGES_REQUESTED":
+            status_parts.append("[yellow]⚠ Changes requested[/yellow]")
+        elif pr.review_decision == "REVIEW_REQUIRED":
+            status_parts.append("[dim]Review required[/dim]")
+
+        # Reviewers
+        if pr.reviewers:
+            reviewers_str = ", ".join(pr.reviewers)
+            status_parts.append(f"[dim]Reviewers: {reviewers_str}[/dim]")
+
+        # CI/CD checks
+        if pr.checks_status == "SUCCESS":
+            status_parts.append("[green]✓ Checks passing[/green]")
+        elif pr.checks_status == "FAILURE":
+            status_parts.append("[red]✗ Checks failing[/red]")
+        elif pr.checks_status == "PENDING":
+            status_parts.append("[yellow]⋯ Checks pending[/yellow]")
+
+        # Merge status
+        if pr.mergeable == "MERGEABLE":
+            status_parts.append("[green]✓ Ready to merge[/green]")
+        elif pr.mergeable == "CONFLICTING":
+            status_parts.append("[red]✗ Has conflicts[/red]")
+
+        self.query_one("#pr-status", Static).update("\n".join(status_parts) if status_parts else "")
 
         # Labels
         if pr.labels:
@@ -435,6 +499,10 @@ class PRDetailScreen(ModalScreen[int]):
         else:
             labels_text = ""
         self.query_one("#pr-labels", Static).update(labels_text)
+
+        # Body/description
+        body_text = pr.body if pr.body else "[dim]No description provided[/dim]"
+        self.query_one("#pr-body", Static).update(body_text)
 
     def _escape(self, text: str) -> str:
         """Escape Rich markup characters in text."""
