@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 from textual import events
@@ -22,6 +24,23 @@ from .widgets.repo_list import RepoListWidget
 
 if TYPE_CHECKING:
     from .models import RepoOverview
+
+
+def _cleanup_terminal():
+    """Force terminal cleanup - runs via atexit."""
+    try:
+        sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
+        sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
+        sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
+        sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
+        sys.stdout.write("\x1b[?25h")    # Show cursor
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+# Register cleanup to run when Python exits
+atexit.register(_cleanup_terminal)
 
 
 HELP_TEXT = """
@@ -534,18 +553,31 @@ class RepoOverviewApp(App[None]):
         """Load data when app starts."""
         self.call_later(self._initial_load)
 
-    async def on_unmount(self) -> None:
-        """Clean up when app exits."""
+    async def _on_exit_app(self) -> None:
+        """Called when the app is about to exit - disable mouse before Textual cleanup."""
         try:
-            # Disable mouse tracking to prevent leaking to other terminal sessions
-            import sys
-            sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
-            sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
-            sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
-            sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
+            # Force disable mouse tracking before Textual's cleanup
+            sys.stdout.write("\x1b[?1000l")
+            sys.stdout.write("\x1b[?1002l")
+            sys.stdout.write("\x1b[?1003l")
+            sys.stdout.write("\x1b[?1006l")
             sys.stdout.flush()
         except Exception:
-            pass  # Don't fail on cleanup
+            pass
+        await super()._on_exit_app()
+
+    async def _shutdown(self) -> None:
+        """Override shutdown to ensure mouse is disabled."""
+        try:
+            # Disable mouse one more time during shutdown
+            sys.stdout.write("\x1b[?1000l")
+            sys.stdout.write("\x1b[?1002l")
+            sys.stdout.write("\x1b[?1003l")
+            sys.stdout.write("\x1b[?1006l")
+            sys.stdout.flush()
+        except Exception:
+            pass
+        await super()._shutdown()
 
     async def _initial_load(self) -> None:
         """Initial data load with loading screen."""
@@ -891,20 +923,8 @@ class RepoOverviewApp(App[None]):
 
 def main() -> None:
     """Entry point for the repo-tui command."""
-    import sys
     app = RepoOverviewApp()
-    try:
-        app.run()
-    finally:
-        try:
-            # Ensure terminal modes are reset even on crash
-            sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
-            sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
-            sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
-            sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
-            sys.stdout.flush()
-        except Exception:
-            pass  # Don't fail during cleanup
+    app.run()
 
 
 if __name__ == "__main__":

@@ -26,16 +26,25 @@ class GitHubClient:
         self.config = config
 
     async def get_user_repos(self) -> list[dict[str, Any]]:
-        """Get all repositories for the authenticated user."""
+        """Get all repositories for the authenticated user or organization."""
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "gh",
-                "repo",
-                "list",
+            # Build command based on whether github_org is set
+            cmd = ["gh", "repo", "list"]
+
+            # If github_org is configured, list repos from that org
+            github_org = self.config.data.get("github_org")
+            if github_org:
+                cmd.append(github_org)
+
+            cmd.extend([
                 "--json",
                 "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description",
                 "--limit",
                 "1000",
+            ])
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -144,7 +153,7 @@ class GitHubClient:
             tuple: (has_uncommitted_changes, current_branch)
         """
         try:
-            # Check for uncommitted changes
+            # Check for uncommitted changes (ignoring untracked files)
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "-C",
@@ -159,7 +168,12 @@ class GitHubClient:
             if proc.returncode != 0:
                 return (False, None)
 
-            has_changes = len(stdout.decode().strip()) > 0
+            # Only count modified/added/deleted tracked files, not untracked files (??)
+            status_lines = stdout.decode().strip().split('\n')
+            has_changes = any(
+                line and not line.startswith('??')
+                for line in status_lines
+            )
 
             # Get current branch
             proc = await asyncio.create_subprocess_exec(
@@ -261,7 +275,7 @@ async def fetch_all_repos(
     repos = await github.get_user_repos()
     overviews: list[RepoOverview] = []
 
-    repos = [r for r in repos if not config.is_excluded(r["name"])]
+    repos = [r for r in repos if config.should_include_repo(r["name"])]
 
     if limit > 0:
         repos = repos[:limit]

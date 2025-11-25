@@ -21,7 +21,8 @@ class Config:
                 return json.load(f)
 
         default_config: dict[str, Any] = {
-            "excluded_repos": [],
+            "included_repos": [],  # If set, ONLY show these repos (whitelist)
+            "excluded_repos": [],  # If included_repos is empty, hide these repos (blacklist)
             "sonarcloud_org": None,
             "github_org": None,
             "local_code_path": "~/Code",
@@ -35,9 +36,26 @@ class Config:
         with open(self.config_path, "w") as f:
             json.dump(config, f, indent=2)
 
+    def should_include_repo(self, repo_name: str) -> bool:
+        """Check if a repository should be included.
+
+        Logic:
+        - If included_repos is set (non-empty), ONLY show repos in that list
+        - If included_repos is empty, show all repos EXCEPT those in excluded_repos
+        """
+        included_repos = self.data.get("included_repos", [])
+
+        # Whitelist mode: if included_repos is set, only show those
+        if included_repos:
+            return repo_name in included_repos
+
+        # Blacklist mode: show all except excluded
+        excluded_repos = self.data.get("excluded_repos", [])
+        return repo_name not in excluded_repos
+
     def is_excluded(self, repo_name: str) -> bool:
-        """Check if a repository is excluded."""
-        return repo_name in self.data.get("excluded_repos", [])
+        """Check if a repository is excluded (legacy method, use should_include_repo instead)."""
+        return not self.should_include_repo(repo_name)
 
     def get_sonarcloud_org(self) -> str | None:
         """Get SonarCloud organization name."""
