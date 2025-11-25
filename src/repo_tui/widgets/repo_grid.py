@@ -31,26 +31,29 @@ class RepoCard(Static):
 
         counts_parts = []
         if issue_count > 0:
-            counts_parts.append(f"{issue_count} issues")
+            counts_parts.append(f"[cyan]{issue_count}[/cyan] issues")
         if pr_count > 0:
-            counts_parts.append(f"{pr_count} PRs")
-        counts = ", ".join(counts_parts) if counts_parts else "No issues or PRs"
+            counts_parts.append(f"[green]{pr_count}[/green] PRs")
+        counts = ", ".join(counts_parts) if counts_parts else "[dim]No issues or PRs[/dim]"
 
         # Git status
-        git_status = ""
         if repo.local_path:
             if repo.has_uncommitted_changes:
-                git_status = f"[yellow]✱ uncommitted[/yellow]"
+                git_status = f"[yellow]✱ {repo.current_branch or 'local'}[/yellow]"
             elif repo.current_branch:
-                git_status = f"[dim]{repo.current_branch}[/dim]"
+                git_status = f"[dim]⎇ {repo.current_branch}[/dim]"
+            else:
+                git_status = "[dim]local[/dim]"
         else:
             git_status = "[dim]remote[/dim]"
 
-        # Language tag
-        lang_tag = f"[cyan]{repo.language}[/cyan]" if repo.language else ""
-
-        # Cloud tag
-        cloud_tag = f"[magenta]{repo.cloud_env}[/magenta]" if repo.cloud_env else ""
+        # Tags line (language and/or cloud)
+        tags = []
+        if repo.language:
+            tags.append(f"[cyan]{repo.language}[/cyan]")
+        if repo.cloud_env:
+            tags.append(f"[magenta]{repo.cloud_env}[/magenta]")
+        tags_line = " · ".join(tags) if tags else ""
 
         # SonarCloud status
         sonar_info = ""
@@ -62,31 +65,42 @@ class RepoCard(Static):
                 sonar_info = "[yellow]⚠ Sonar[/yellow]"
             elif status == "OK":
                 sonar_info = "[green]✓ Sonar[/green]"
-        elif repo.sonar_checked:
-            sonar_info = "[dim]No Sonar[/dim]"
 
         # Activity indicator (basic heuristic)
         activity = ""
         total_items = issue_count + pr_count
         if total_items >= 5:
-            activity = "[red]🔥 active[/red]"
+            activity = "🔥"
         elif total_items >= 2:
-            activity = "[yellow]🟡 moderate[/yellow]"
+            activity = "🟡"
         elif total_items == 0:
-            activity = "[green]🟢 stable[/green]"
+            activity = "🟢"
 
-        # Build card content
+        # Build card content - compact and always visible
         lines = [
             f"[bold]{repo.name}[/bold]",
             "",
-            f"{lang_tag} {cloud_tag}".strip(),
-            f"[dim]{counts}[/dim]",
-            f"{git_status}",
-            "",
-            f"{sonar_info} {activity}".strip(),
         ]
 
-        return "\n".join(line for line in lines if line or line == "")
+        if tags_line:
+            lines.append(tags_line)
+
+        lines.extend([
+            counts,
+            git_status,
+        ])
+
+        # Bottom line: sonar and/or activity
+        bottom_parts = []
+        if sonar_info:
+            bottom_parts.append(sonar_info)
+        if activity:
+            bottom_parts.append(activity)
+        if bottom_parts:
+            lines.append("")
+            lines.append(" ".join(bottom_parts))
+
+        return "\n".join(lines)
 
 
 class RepoGridWidget(VerticalScroll):
