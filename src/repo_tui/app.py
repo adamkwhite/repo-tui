@@ -536,13 +536,16 @@ class RepoOverviewApp(App[None]):
 
     async def on_unmount(self) -> None:
         """Clean up when app exits."""
-        # Disable mouse tracking to prevent leaking to other terminal sessions
-        import sys
-        sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
-        sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
-        sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
-        sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
-        sys.stdout.flush()
+        try:
+            # Disable mouse tracking to prevent leaking to other terminal sessions
+            import sys
+            sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
+            sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
+            sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
+            sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
+            sys.stdout.flush()
+        except Exception:
+            pass  # Don't fail on cleanup
 
     async def _initial_load(self) -> None:
         """Initial data load with loading screen."""
@@ -893,12 +896,15 @@ def main() -> None:
     try:
         app.run()
     finally:
-        # Ensure terminal modes are reset even on crash
-        sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
-        sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
-        sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
-        sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
-        sys.stdout.flush()
+        try:
+            # Ensure terminal modes are reset even on crash
+            sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
+            sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
+            sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
+            sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
+            sys.stdout.flush()
+        except Exception:
+            pass  # Don't fail during cleanup
 
 
 if __name__ == "__main__":
