@@ -6,6 +6,7 @@ import asyncio
 import subprocess
 from typing import TYPE_CHECKING
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -13,9 +14,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, LoadingIndicator, Static
 
 from .config import Config
-from .data import fetch_all_repos
+from .data import fetch_all_repos, fetch_single_repo
 from .launcher import launch_claude
-from .models import Issue
+from .models import Issue, PullRequest
+from .widgets.repo_grid import RepoGridWidget
 from .widgets.repo_list import RepoListWidget
 
 if TYPE_CHECKING:
@@ -33,8 +35,10 @@ HELP_TEXT = """
   c             Launch Claude Code
   e             Show issue details
   o             Open in browser
-  r             Refresh data
-  s             Toggle SonarCloud check
+  r             Refresh current repo
+  R             Refresh all repos
+  s             Check SonarCloud for current repo
+  S             Toggle SonarCloud for all repos
   q             Quit
   ?             Show this help
 
@@ -45,13 +49,12 @@ HELP_TEXT = """
 class HelpScreen(ModalScreen[None]):
     """Modal screen showing help."""
 
-    BINDINGS = [Binding("escape", "dismiss", "Close")]
-
     def compose(self) -> ComposeResult:
         yield Static(HELP_TEXT, id="help-content")
 
-    def on_key(self) -> None:
+    def on_key(self, event: events.Key) -> None:
         """Dismiss on any key."""
+        event.stop()
         self.dismiss()
 
 
@@ -283,6 +286,142 @@ class IssueDetailScreen(ModalScreen[int]):
         return text.replace("[", r"\[").replace("]", r"\]")
 
 
+class PRDetailScreen(ModalScreen[int]):
+    """Modal screen showing PR details."""
+
+    BINDINGS = [
+        Binding("escape", "close_modal", "Close"),
+        Binding("e", "close_modal", "Close"),
+    ]
+
+    DEFAULT_CSS = """
+    PRDetailScreen {
+        align: center middle;
+    }
+
+    #pr-detail-container {
+        width: 80%;
+        height: 60%;
+        max-width: 100;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+
+    #pr-header {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #pr-title {
+        text-style: bold;
+        color: $text;
+    }
+
+    #pr-meta {
+        color: $text-muted;
+        height: auto;
+    }
+
+    #pr-labels {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #pr-footer {
+        dock: bottom;
+        height: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(
+        self,
+        pr: PullRequest,
+        repo_name: str = "",
+        pr_list: list[PullRequest] | None = None,
+        current_index: int = 0,
+    ) -> None:
+        super().__init__()
+        self.pr = pr
+        self.repo_name = repo_name
+        self.pr_list = pr_list or []
+        self.current_index = current_index
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="pr-detail-container"):
+            with Vertical(id="pr-header"):
+                yield Static("", id="pr-title")
+                yield Static("", id="pr-meta")
+
+            yield Static("", id="pr-labels")
+            yield Static("[dim]h/l prev/next | Esc close[/dim]", id="pr-footer")
+
+    def on_mount(self) -> None:
+        """Update content on mount."""
+        self._update_content()
+
+    def action_close_modal(self) -> None:
+        """Close modal and return final index."""
+        self.dismiss(result=self.current_index)
+
+    def key_h(self) -> None:
+        """Previous PR."""
+        self._navigate(-1)
+
+    def key_l(self) -> None:
+        """Next PR."""
+        self._navigate(1)
+
+    def key_left(self) -> None:
+        """Previous PR."""
+        self._navigate(-1)
+
+    def key_right(self) -> None:
+        """Next PR."""
+        self._navigate(1)
+
+    def _navigate(self, direction: int) -> None:
+        """Navigate to prev/next PR."""
+        if not self.pr_list:
+            return
+
+        new_index = self.current_index + direction
+        if 0 <= new_index < len(self.pr_list):
+            self.current_index = new_index
+            self.pr = self.pr_list[new_index]
+            self._update_content()
+
+    def _update_content(self) -> None:
+        """Update all content for current PR."""
+        pr = self.pr
+
+        # Title
+        draft_badge = "[yellow]DRAFT[/yellow] " if pr.draft else ""
+        title_text = (
+            f"[bold]{self.repo_name}[/bold] "
+            f"[green]PR #{pr.number}[/green] {draft_badge}{self._escape(pr.title)}"
+        )
+        self.query_one("#pr-title", Static).update(title_text)
+
+        # Meta
+        meta_parts = [f"Author: {pr.author}", f"State: {pr.state}"]
+        if self.pr_list:
+            meta_parts.append(f"({self.current_index + 1}/{len(self.pr_list)})")
+        self.query_one("#pr-meta", Static).update(" | ".join(meta_parts))
+
+        # Labels
+        if pr.labels:
+            labels_text = " ".join(f"[on blue] {label} [/on blue]" for label in pr.labels)
+        else:
+            labels_text = ""
+        self.query_one("#pr-labels", Static).update(labels_text)
+
+    def _escape(self, text: str) -> str:
+        """Escape Rich markup characters in text."""
+        return text.replace("[", r"\[").replace("]", r"\]")
+
+
 class StatusBar(Static):
     """Status bar showing refresh time and counts."""
 
@@ -348,18 +487,26 @@ class RepoOverviewApp(App[None]):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit", priority=True),
-        Binding("r", "refresh", "Refresh", priority=True),
-        Binding("o", "open_browser", "Open", priority=True),
-        Binding("e", "expand_issue", "Details", priority=True),
-        Binding("c", "launch", "Claude", priority=True),
-        Binding("s", "toggle_sonar", "Sonar", priority=True),
-        Binding("question_mark", "help", "Help", priority=True),
-        Binding("space", "toggle_expand", "Expand", priority=True),
+        Binding("q", "quit", "Quit"),
+        Binding("r", "refresh_repo", "Refresh"),
+        Binding("R", "refresh_all", "Refresh All"),
+        Binding("o", "open_browser", "Open"),
+        Binding("e", "expand_issue", "Details"),
+        Binding("c", "launch", "Claude"),
+        Binding("s", "sonar_repo", "Sonar"),
+        Binding("S", "sonar_all", "Sonar All"),
+        Binding("question_mark", "help", "Help"),
+        Binding("space", "toggle_expand", "Expand"),
+        Binding("1", "switch_view_list", "List", show=False),
+        Binding("2", "switch_view_grid", "Grid", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
+        Binding("h", "cursor_left", "Left", show=False),
+        Binding("l", "cursor_right", "Right", show=False),
         Binding("down", "cursor_down", "Down", show=False),
         Binding("up", "cursor_up", "Up", show=False),
+        Binding("left", "cursor_left", "Left", show=False),
+        Binding("right", "cursor_right", "Right", show=False),
     ]
 
     def __init__(self, check_sonar: bool = False) -> None:
@@ -367,6 +514,7 @@ class RepoOverviewApp(App[None]):
         self.config = Config()
         self.repos: list[RepoOverview] = []
         self.check_sonar = check_sonar
+        self.view_mode = "list"  # "list" or "grid"
 
     def compose(self) -> ComposeResult:
         """Create the UI layout."""
@@ -374,7 +522,10 @@ class RepoOverviewApp(App[None]):
 
         with Vertical(id="main-container"), Vertical(id="repo-pane"):
             yield Static("Repositories", classes="pane-title")
-            yield RepoListWidget(id="repo-list")
+            if self.view_mode == "list":
+                yield RepoListWidget(id="repo-list")
+            else:  # grid
+                yield RepoGridWidget(id="repo-grid")
 
         yield StatusBar()
         yield Footer()
@@ -382,6 +533,16 @@ class RepoOverviewApp(App[None]):
     async def on_mount(self) -> None:
         """Load data when app starts."""
         self.call_later(self._initial_load)
+
+    async def on_unmount(self) -> None:
+        """Clean up when app exits."""
+        # Disable mouse tracking to prevent leaking to other terminal sessions
+        import sys
+        sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
+        sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
+        sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
+        sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
+        sys.stdout.flush()
 
     async def _initial_load(self) -> None:
         """Initial data load with loading screen."""
@@ -412,9 +573,91 @@ class RepoOverviewApp(App[None]):
         sonar_indicator = " [SonarCloud ON]" if self.check_sonar else ""
         status_bar.update_stats(len(self.repos), total_issues, f"Ready{sonar_indicator}")
 
-    async def action_refresh(self) -> None:
-        """Refresh repository data."""
-        loading_screen = LoadingScreen("Refreshing...")
+    def _get_current_widget(self):
+        """Get the current view widget (list or grid)."""
+        if self.view_mode == "list":
+            return self.query_one("#repo-list", RepoListWidget)
+        else:
+            return self.query_one("#repo-grid", RepoGridWidget)
+
+    async def action_switch_view_list(self) -> None:
+        """Switch to list view."""
+        if self.view_mode != "list":
+            # Remember selected repo
+            current_widget = self._get_current_widget()
+            selected_repo = current_widget.get_selected_repo()
+
+            # Switch view mode
+            self.view_mode = "list"
+            await self.recompose()
+
+            # Restore data
+            new_widget = self._get_current_widget()
+            new_widget.set_repos(self.repos)
+
+            # TODO: Re-select same repo if possible
+
+    async def action_switch_view_grid(self) -> None:
+        """Switch to grid view."""
+        if self.view_mode != "grid":
+            # Remember selected repo
+            current_widget = self._get_current_widget()
+            selected_repo = current_widget.get_selected_repo()
+
+            # Switch view mode
+            self.view_mode = "grid"
+            await self.recompose()
+
+            # Restore data
+            new_widget = self._get_current_widget()
+            new_widget.set_repos(self.repos)
+
+            # TODO: Re-select same repo if possible
+
+    async def action_refresh_repo(self) -> None:
+        """Refresh the currently selected repository."""
+        current_widget = self._get_current_widget()
+        status_bar = self.query_one(StatusBar)
+
+        selected_repo = current_widget.get_selected_repo()
+        if not selected_repo:
+            status_bar.update_stats(len(self.repos), sum(r.open_issues_count for r in self.repos), "No repo selected")
+            return
+
+        loading_screen = LoadingScreen(f"Refreshing {selected_repo.name}...")
+        self.push_screen(loading_screen)
+
+        await asyncio.sleep(0.1)
+
+        try:
+            updated_repo = await fetch_single_repo(
+                self.config,
+                selected_repo.owner,
+                selected_repo.name,
+                self.check_sonar,
+            )
+
+            # Replace the repo in our list
+            for i, repo in enumerate(self.repos):
+                if repo.name == selected_repo.name:
+                    self.repos[i] = updated_repo
+                    break
+
+            current_widget.set_repos(self.repos)
+
+            # Re-select the same repo (only works for list view)
+            if self.view_mode == "list":
+                current_widget._select_by_id(f"repo:{selected_repo.name}")
+
+            total_issues = sum(r.open_issues_count for r in self.repos)
+            sonar_indicator = " [SonarCloud ON]" if self.check_sonar else ""
+            status_bar.update_stats(len(self.repos), total_issues, f"Refreshed {selected_repo.name}{sonar_indicator}")
+        finally:
+            self.pop_screen()
+
+    async def action_refresh_all(self) -> None:
+        """Refresh all repository data."""
+        loading_screen = LoadingScreen("Refreshing all...")
         self.push_screen(loading_screen)
 
         await asyncio.sleep(0.1)
@@ -424,17 +667,55 @@ class RepoOverviewApp(App[None]):
         finally:
             self.pop_screen()
 
-    async def action_toggle_sonar(self) -> None:
-        """Toggle SonarCloud checking and refresh."""
-        self.check_sonar = not self.check_sonar
-        await self.action_refresh()
-
-    async def action_launch(self) -> None:
-        """Launch Claude Code for selected repo/issue."""
-        repo_list = self.query_one("#repo-list", RepoListWidget)
+    async def action_sonar_repo(self) -> None:
+        """Fetch SonarCloud status for the currently selected repo."""
+        current_widget = self._get_current_widget()
         status_bar = self.query_one(StatusBar)
 
-        selected_repo = repo_list.get_selected_repo()
+        selected_repo = current_widget.get_selected_repo()
+        if not selected_repo:
+            status_bar.update_stats(len(self.repos), sum(r.open_issues_count for r in self.repos), "No repo selected")
+            return
+
+        loading_screen = LoadingScreen(f"Checking Sonar for {selected_repo.name}...")
+        self.push_screen(loading_screen)
+
+        await asyncio.sleep(0.1)
+
+        try:
+            updated_repo = await fetch_single_repo(
+                self.config,
+                selected_repo.owner,
+                selected_repo.name,
+                check_sonar=True,
+            )
+
+            # Replace the repo in our list
+            for i, repo in enumerate(self.repos):
+                if repo.name == selected_repo.name:
+                    self.repos[i] = updated_repo
+                    break
+
+            current_widget.set_repos(self.repos)
+            if self.view_mode == "list":
+                current_widget._select_by_id(f"repo:{selected_repo.name}")
+
+            total_issues = sum(r.open_issues_count for r in self.repos)
+            status_bar.update_stats(len(self.repos), total_issues, f"Sonar checked: {selected_repo.name}")
+        finally:
+            self.pop_screen()
+
+    async def action_sonar_all(self) -> None:
+        """Toggle SonarCloud checking and refresh all repos."""
+        self.check_sonar = not self.check_sonar
+        await self.action_refresh_all()
+
+    async def action_launch(self) -> None:
+        """Launch Claude Code for selected repo/issue/PR."""
+        current_widget = self._get_current_widget()
+        status_bar = self.query_one(StatusBar)
+
+        selected_repo = current_widget.get_selected_repo()
         if not selected_repo:
             status_bar.update("No repo selected")
             return
@@ -443,20 +724,27 @@ class RepoOverviewApp(App[None]):
             status_bar.update(f"Repo not found locally: ~/Code/{selected_repo.name}")
             return
 
-        # Check if an inline issue is selected
-        inline = repo_list.get_selected_inline_issue()
-        selected_issue = inline[1] if inline else None
+        # Check if an inline PR is selected
+        pr_inline = current_widget.get_selected_inline_pr()
+        selected_pr = pr_inline[1] if pr_inline else None
 
-        msg = (
-            f"Launching #{selected_issue.number}..."
-            if selected_issue
-            else f"Launching {selected_repo.name}..."
-        )
+        # Check if an inline issue is selected
+        issue_inline = current_widget.get_selected_inline_issue()
+        selected_issue = issue_inline[1] if issue_inline else None
+
+        msg = ""
+        if selected_pr:
+            msg = f"Launching PR #{selected_pr.number}..."
+        elif selected_issue:
+            msg = f"Launching #{selected_issue.number}..."
+        else:
+            msg = f"Launching {selected_repo.name}..."
+
         loading_screen = LoadingScreen(msg)
         await self.push_screen(loading_screen)
 
         await asyncio.sleep(0.1)
-        result = launch_claude(selected_repo, selected_issue)
+        result = launch_claude(selected_repo, selected_issue, selected_pr)
 
         await asyncio.sleep(1.5)
         self.pop_screen()
@@ -465,14 +753,14 @@ class RepoOverviewApp(App[None]):
 
     async def action_open_browser(self) -> None:
         """Open selected item in browser."""
-        repo_list = self.query_one("#repo-list", RepoListWidget)
+        current_widget = self._get_current_widget()
 
         url = None
-        inline = repo_list.get_selected_inline_issue()
+        inline = current_widget.get_selected_inline_issue()
         if inline:
             url = inline[1].url
         else:
-            repo = repo_list.get_selected_repo()
+            repo = current_widget.get_selected_repo()
             if repo:
                 url = repo.url
 
@@ -484,30 +772,56 @@ class RepoOverviewApp(App[None]):
             )
 
     async def action_toggle_expand(self) -> None:
-        """Toggle expand/collapse for selected repo."""
-        repo_list = self.query_one("#repo-list", RepoListWidget)
-        repo_list.toggle_expand()
+        """Toggle expand/collapse for selected repo (list view only)."""
+        if self.view_mode == "list":
+            repo_list = self.query_one("#repo-list", RepoListWidget)
+            repo_list.toggle_expand()
 
     async def action_cursor_down(self) -> None:
-        """Move cursor down in focused list."""
-        focused = self.focused
-        if isinstance(focused, RepoListWidget):
-            focused.action_cursor_down()
+        """Move cursor down in current widget."""
+        current_widget = self._get_current_widget()
+        current_widget.action_cursor_down()
 
     async def action_cursor_up(self) -> None:
-        """Move cursor up in focused list."""
-        focused = self.focused
-        if isinstance(focused, RepoListWidget):
-            focused.action_cursor_up()
+        """Move cursor up in current widget."""
+        current_widget = self._get_current_widget()
+        current_widget.action_cursor_up()
+
+    async def action_cursor_left(self) -> None:
+        """Move cursor left in current widget (grid only)."""
+        if self.view_mode == "grid":
+            current_widget = self._get_current_widget()
+            current_widget.action_cursor_left()
+
+    async def action_cursor_right(self) -> None:
+        """Move cursor right in current widget (grid only)."""
+        if self.view_mode == "grid":
+            current_widget = self._get_current_widget()
+            current_widget.action_cursor_right()
 
     async def action_expand_issue(self) -> None:
-        """Show full issue details in a modal."""
-        repo_list = self.query_one("#repo-list", RepoListWidget)
+        """Show full issue or PR details in a modal."""
+        current_widget = self._get_current_widget()
 
-        inline = repo_list.get_selected_inline_issue()
-        if inline:
-            repo, issue = inline
-            # Get all issues for navigation
+        # Check if PR is selected
+        pr_inline = current_widget.get_selected_inline_pr()
+        if pr_inline:
+            repo, pr = pr_inline
+            pr_list = repo.pull_requests or []
+            current_index = next(
+                (i for i, p in enumerate(pr_list) if p.number == pr.number),
+                0,
+            )
+            await self.push_screen(
+                PRDetailScreen(pr, repo.name, pr_list, current_index),
+                callback=self._on_pr_detail_dismiss,
+            )
+            return
+
+        # Check if issue is selected
+        issue_inline = current_widget.get_selected_inline_issue()
+        if issue_inline:
+            repo, issue = issue_inline
             issue_list = repo.issues
             current_index = next(
                 (i for i, iss in enumerate(issue_list) if iss.number == issue.number),
@@ -517,27 +831,45 @@ class RepoOverviewApp(App[None]):
                 IssueDetailScreen(issue, repo.name, issue_list, current_index),
                 callback=self._on_issue_detail_dismiss,
             )
-        else:
-            # On a repo row - expand to show issues first, or show first issue
-            repo = repo_list.get_selected_repo()
-            if repo and repo.issues:
-                if repo.name not in repo_list.expanded:
-                    repo_list.toggle_expand()
-                else:
-                    # Already expanded, show first issue
+            return
+
+        # On a repo row - expand to show PRs/issues first, or show first PR/issue
+        repo = current_widget.get_selected_repo()
+        if repo:
+            # List view: check if expanded
+            if self.view_mode == "list" and repo.name not in current_widget.expanded:
+                current_widget.toggle_expand()
+            else:
+                # Already expanded, show first PR or issue
+                if repo.pull_requests:
+                    await self.push_screen(
+                        PRDetailScreen(repo.pull_requests[0], repo.name, repo.pull_requests, 0),
+                        callback=self._on_pr_detail_dismiss,
+                    )
+                elif repo.issues:
                     await self.push_screen(
                         IssueDetailScreen(repo.issues[0], repo.name, repo.issues, 0),
                         callback=self._on_issue_detail_dismiss,
                     )
 
     def _on_issue_detail_dismiss(self, result: int | None) -> None:
-        """Sync repo list when modal is dismissed."""
-        if result is not None:
+        """Sync widget when modal is dismissed (list view only)."""
+        if result is not None and self.view_mode == "list":
             repo_list = self.query_one("#repo-list", RepoListWidget)
             repo = repo_list.get_selected_repo()
             if repo and repo.name in repo_list.expanded and result < len(repo.issues):
                 issue = repo.issues[result]
                 target_id = f"issue:{repo.name}:{issue.number}"
+                repo_list._select_by_id(target_id)
+
+    def _on_pr_detail_dismiss(self, result: int | None) -> None:
+        """Sync widget when PR modal is dismissed (list view only)."""
+        if result is not None and self.view_mode == "list":
+            repo_list = self.query_one("#repo-list", RepoListWidget)
+            repo = repo_list.get_selected_repo()
+            if repo and repo.name in repo_list.expanded and repo.pull_requests and result < len(repo.pull_requests):
+                pr = repo.pull_requests[result]
+                target_id = f"pr:{repo.name}:{pr.number}"
                 repo_list._select_by_id(target_id)
 
     async def action_help(self) -> None:
@@ -547,8 +879,17 @@ class RepoOverviewApp(App[None]):
 
 def main() -> None:
     """Entry point for the repo-tui command."""
+    import sys
     app = RepoOverviewApp()
-    app.run()
+    try:
+        app.run()
+    finally:
+        # Ensure terminal modes are reset even on crash
+        sys.stdout.write("\x1b[?1000l")  # Disable mouse click tracking
+        sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
+        sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
+        sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
