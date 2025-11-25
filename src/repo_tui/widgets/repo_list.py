@@ -146,10 +146,32 @@ class RepoListWidget(OptionList):
         """Build a rich option for a PR (indented under repo)."""
         draft = "[dim]draft[/dim] " if pr.draft else ""
 
-        # Extract date from created_at (YYYY-MM-DD format)
+        # Extract date from created_at and color-code based on age
         date_str = ""
         if pr.created_at:
-            date_str = f"[dim]on {pr.created_at.split('T')[0]}[/dim] "
+            from datetime import datetime, timezone
+            date_only = pr.created_at.split('T')[0]
+
+            # Calculate age in days
+            try:
+                created_date = datetime.fromisoformat(pr.created_at.replace('Z', '+00:00'))
+                now = datetime.now(timezone.utc)
+                age_days = (now - created_date).days
+
+                # Color-code based on age
+                if age_days < 7:
+                    date_color = "green"
+                elif age_days < 30:
+                    date_color = "dim"
+                elif age_days < 90:
+                    date_color = "yellow"
+                else:
+                    date_color = "red"
+
+                date_str = f"[{date_color}]on {date_only}[/{date_color}] "
+            except (ValueError, AttributeError):
+                # Fallback if date parsing fails
+                date_str = f"[dim]on {date_only}[/dim] "
 
         author = f"[dim]by {pr.author}[/dim] " if pr.author else ""
         text = Text.from_markup(f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{pr.title}")
