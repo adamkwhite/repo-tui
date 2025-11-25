@@ -97,10 +97,10 @@ class RepoListWidget(OptionList):
 
         # Build counts display
         counts_parts = []
-        if issue_count > 0:
-            counts_parts.append(f"{issue_count} issues")
         if pr_count > 0:
             counts_parts.append(f"{pr_count} PRs")
+        if issue_count > 0:
+            counts_parts.append(f"{issue_count} issues")
         counts_badge = f" [dim]{', '.join(counts_parts)}[/dim]" if counts_parts else ""
 
         # Local/remote indicator with branch info
@@ -145,8 +145,14 @@ class RepoListWidget(OptionList):
     def _build_pr_option(self, repo: RepoOverview, pr: PullRequest) -> Option:
         """Build a rich option for a PR (indented under repo)."""
         draft = "[dim]draft[/dim] " if pr.draft else ""
+
+        # Extract date from created_at (YYYY-MM-DD format)
+        date_str = ""
+        if pr.created_at:
+            date_str = f"[dim]on {pr.created_at.split('T')[0]}[/dim] "
+
         author = f"[dim]by {pr.author}[/dim] " if pr.author else ""
-        text = Text.from_markup(f"    [green]PR #{pr.number}[/green] {draft}{author}{pr.title}")
+        text = Text.from_markup(f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{pr.title}")
         return Option(text, id=f"pr:{repo.name}:{pr.number}")
 
     def _build_empty_option(self, repo: RepoOverview) -> Option:
