@@ -38,6 +38,7 @@ class PullRequest:
     updated_at: str | None = None
     mergeable: str | None = None  # MERGEABLE, CONFLICTING, UNKNOWN
     checks_status: str | None = None  # SUCCESS, FAILURE, PENDING
+    author_name: str | None = None  # Full name of author (if available)
 
 
 @dataclass

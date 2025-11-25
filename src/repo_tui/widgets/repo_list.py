@@ -173,7 +173,9 @@ class RepoListWidget(OptionList):
                 # Fallback if date parsing fails
                 date_str = f"[dim]on {date_only}[/dim] "
 
-        author = f"[dim]by {pr.author}[/dim] " if pr.author else ""
+        # Prefer full name over username
+        display_name = pr.author_name if pr.author_name else pr.author
+        author = f"[dim]by {display_name}[/dim] " if display_name else ""
         text = Text.from_markup(f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{pr.title}")
         return Option(text, id=f"pr:{repo.name}:{pr.number}")
 

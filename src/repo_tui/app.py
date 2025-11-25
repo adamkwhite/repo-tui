@@ -445,7 +445,8 @@ class PRDetailScreen(ModalScreen[int]):
         self.query_one("#pr-title", Static).update(title_text)
 
         # Meta - author, dates, navigation
-        meta_parts = [f"by {pr.author}"]
+        display_name = pr.author_name if pr.author_name else pr.author
+        meta_parts = [f"by {display_name}"]
         if pr.created_at:
             # Simple date formatting (just the date part)
             created_date = pr.created_at.split("T")[0]

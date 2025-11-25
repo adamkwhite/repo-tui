@@ -165,11 +165,16 @@ class GitHubClient:
                         elif all(s in ["SUCCESS", "success"] for s in statuses if s):
                             checks_status = "SUCCESS"
 
+                # Extract author info
+                author_obj = pr.get("author", {})
+                author_login = author_obj.get("login", "unknown")
+                author_name = author_obj.get("name")  # Full name (may be None)
+
                 result.append(PullRequest(
                     number=pr["number"],
                     title=pr["title"],
                     url=pr["url"],
-                    author=pr.get("author", {}).get("login", "unknown"),
+                    author=author_login,
                     state=pr["state"],
                     draft=pr.get("isDraft", False),
                     labels=[label["name"] for label in pr.get("labels", [])],
@@ -182,6 +187,7 @@ class GitHubClient:
                     updated_at=pr.get("updatedAt"),
                     mergeable=pr.get("mergeable"),
                     checks_status=checks_status,
+                    author_name=author_name,
                 ))
 
             with open("/tmp/pr-fetch-debug.log", "a") as f:

@@ -8,7 +8,8 @@
       "Bash(/home/adam/Code/repo-tui/venv/bin/pip install:*)",
       "mcp__filesystem__write_file",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
