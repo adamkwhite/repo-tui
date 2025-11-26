@@ -899,13 +899,20 @@ class RepoOverviewApp(App[None]):
         status_bar = self.query_one(StatusBar)
 
         url = None
-        inline = current_widget.get_selected_inline_issue()
-        if inline:
-            url = inline[1].url
+        # Check for inline PR first
+        inline_pr = current_widget.get_selected_inline_pr()
+        if inline_pr:
+            url = inline_pr[1].url
         else:
-            repo = current_widget.get_selected_repo()
-            if repo:
-                url = repo.url
+            # Check for inline issue
+            inline_issue = current_widget.get_selected_inline_issue()
+            if inline_issue:
+                url = inline_issue[1].url
+            else:
+                # Fall back to repo URL
+                repo = current_widget.get_selected_repo()
+                if repo:
+                    url = repo.url
 
         if url:
             try:
