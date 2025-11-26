@@ -55,6 +55,7 @@ def build_wt_command(
 
     # Build command - use configured claude command
     # Wrap in bash -c with 'reset' to clear any inherited terminal state
+    # Source .bashrc to make bash functions (like cwork) available
     return [
         "wt.exe",
         "-w",
@@ -71,7 +72,7 @@ def build_wt_command(
         "--",
         "bash",
         "-c",
-        f"reset && {claude_command} '{escaped_prompt}'",
+        f"source ~/.bashrc && reset && {claude_command} '{escaped_prompt}'",
     ]
 
 
