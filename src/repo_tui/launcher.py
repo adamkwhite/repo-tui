@@ -54,8 +54,8 @@ def build_wt_command(
     escaped_prompt = prompt.replace("'", "'\\''")
 
     # Build command - use configured claude command
+    # Use bash -i (interactive) to ensure .bashrc is loaded (bypasses non-interactive guard)
     # Wrap in bash -c with 'reset' to clear any inherited terminal state
-    # Source .bashrc to make bash functions (like cwork) available
     return [
         "wt.exe",
         "-w",
@@ -71,8 +71,9 @@ def build_wt_command(
         "Ubuntu",
         "--",
         "bash",
+        "-i",
         "-c",
-        f"source ~/.bashrc && reset && {claude_command} '{escaped_prompt}'",
+        f"reset && {claude_command} '{escaped_prompt}'",
     ]
 
 
