@@ -194,6 +194,16 @@ dmyp.json
 .ruff_cache/
 
 # ==============================================================================
+# CLAUDE CODE
+# ==============================================================================
+
+# Claude Code local settings (machine-specific configuration)
+# - Contains auto-approved commands specific to this machine
+# - .claude/settings.json is committed (shared team settings)
+# - .claude/settings.local.json is local only (personal overrides)
+.claude/settings.local.json
+
+# ==============================================================================
 # SONARCLOUD
 # ==============================================================================
 
