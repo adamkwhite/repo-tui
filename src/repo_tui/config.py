@@ -8,6 +8,7 @@ from typing import Any
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
@@ -31,9 +32,11 @@ class Config:
         """Load configuration from YAML or JSON file or create default."""
         if self.config_path.exists():
             with open(self.config_path) as f:
-                if self.config_path.suffix in ['.yaml', '.yml']:
+                if self.config_path.suffix in [".yaml", ".yml"]:
                     if not HAS_YAML:
-                        raise ImportError("pyyaml is required for YAML config. Install with: pip install pyyaml")
+                        raise ImportError(
+                            "pyyaml is required for YAML config. Install with: pip install pyyaml"
+                        )
                     data: dict[str, Any] = yaml.safe_load(f) or {}
                     return data
                 else:
@@ -102,6 +105,7 @@ class Config:
         if pass_path:
             try:
                 import subprocess
+
                 result = subprocess.run(
                     ["pass", pass_path],
                     capture_output=True,

@@ -168,7 +168,9 @@ class RepoGridWidget(VerticalScroll):
             f.write("\n=== set_repos called ===\n")
             f.write(f"Total repos: {len(sorted_repos)}\n")
             for i, repo in enumerate(sorted_repos[:10]):
-                f.write(f"  {i}: {repo.name} - issues:{repo.open_issues_count} branch:{repo.current_branch}\n")
+                f.write(
+                    f"  {i}: {repo.name} - issues:{repo.open_issues_count} branch:{repo.current_branch}\n"
+                )
 
         # Create cards
         for repo in sorted_repos:

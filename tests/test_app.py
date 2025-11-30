@@ -7,8 +7,8 @@ def test_app_can_instantiate():
     """Test that the app can be created without errors."""
     app = RepoOverviewApp()
     assert app is not None
-    assert hasattr(app, 'config')
-    assert hasattr(app, 'repos')
+    assert hasattr(app, "config")
+    assert hasattr(app, "repos")
     assert app.view_mode == "list"
 
 
@@ -23,9 +23,10 @@ def test_app_has_required_attributes():
     app = RepoOverviewApp()
 
     # Check that mouse_over is not set to a bool (it should be None or a widget)
-    if hasattr(app, 'mouse_over'):
-        assert not isinstance(app.mouse_over, bool), \
+    if hasattr(app, "mouse_over"):
+        assert not isinstance(app.mouse_over, bool), (
             "mouse_over should not be a boolean, it should be a Widget or None"
+        )
 
     # Check view mode is valid
     assert app.view_mode in ["list", "grid"]
