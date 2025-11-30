@@ -845,7 +845,8 @@ class RepoOverviewApp(App[None]):
 
             # Update the display
             current_widget = self._get_current_widget()
-            current_widget.set_repos(self.repos)
+            if current_widget:
+                current_widget.set_repos(self.repos)
 
             status_bar = self.query_one(StatusBar)
             total_issues = sum(r.open_issues_count for r in self.repos)
