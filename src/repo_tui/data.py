@@ -53,7 +53,7 @@ class GitHubClient:
             if proc.returncode != 0:
                 return []
 
-            repos = json.loads(stdout.decode())
+            repos: list[dict[str, Any]] = json.loads(stdout.decode())
             for repo in repos:
                 repo["openIssuesCount"] = 0
             return repos
@@ -130,7 +130,7 @@ class GitHubClient:
 
             if proc.returncode != 0:
                 with open("/tmp/pr-fetch-debug.log", "a") as f:
-                    f.write(f"Non-zero return code, returning empty\n")
+                    f.write("Non-zero return code, returning empty\n")
                 return []
 
             prs_data = json.loads(stdout.decode())
@@ -328,7 +328,7 @@ class SonarCloudClient:
                     f.write(f"Has token: {bool(self.token)}\n")
 
             with urllib.request.urlopen(request, timeout=10) as response:
-                data = json.loads(response.read().decode())
+                data: dict[str, Any] = json.loads(response.read().decode())
                 if self.config.data.get("debug", False):
                     with open("/tmp/sonar-fetch-debug.log", "a") as f:
                         f.write(f"Success: {data}\n")

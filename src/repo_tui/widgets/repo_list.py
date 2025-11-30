@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from rich.text import Text
@@ -149,13 +150,13 @@ class RepoListWidget(OptionList):
         # Extract date from created_at and color-code based on age
         date_str = ""
         if pr.created_at:
-            from datetime import datetime, timezone
+            from datetime import datetime
             date_only = pr.created_at.split('T')[0]
 
             # Calculate age in days
             try:
                 created_date = datetime.fromisoformat(pr.created_at.replace('Z', '+00:00'))
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 age_days = (now - created_date).days
 
                 # Color-code based on age
@@ -221,9 +222,7 @@ class RepoListWidget(OptionList):
 
         if option.id.startswith("repo:"):
             repo_name = option.id.split(":", 1)[1]
-        elif option.id.startswith("issue:"):
-            repo_name = option.id.split(":")[1]
-        elif option.id.startswith("pr:"):
+        elif option.id.startswith("issue:") or option.id.startswith("pr:"):
             repo_name = option.id.split(":")[1]
         else:
             return None
@@ -285,11 +284,10 @@ class RepoListWidget(OptionList):
                     return None
 
                 for repo in self.repos:
-                    if repo.name == repo_name:
-                        if repo.pull_requests:
-                            for pr in repo.pull_requests:
-                                if pr.number == pr_number:
-                                    return (repo, pr)
+                    if repo.name == repo_name and repo.pull_requests:
+                        for pr in repo.pull_requests:
+                            if pr.number == pr_number:
+                                return (repo, pr)
         return None
 
     def on_option_list_option_highlighted(

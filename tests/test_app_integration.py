@@ -1,7 +1,9 @@
 """Integration tests for the repo-tui app using Textual's Pilot API."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from repo_tui.app import RepoOverviewApp
 from repo_tui.models import RepoOverview
 

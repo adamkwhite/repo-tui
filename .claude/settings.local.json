@@ -9,7 +9,12 @@
       "mcp__filesystem__write_file",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(gh run:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(ruff check:*)",
+      "Bash(pip install:*)",
+      "Bash(mypy:*)"
     ],
     "deny": [],
     "ask": []

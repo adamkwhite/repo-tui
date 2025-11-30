@@ -34,9 +34,11 @@ class Config:
                 if self.config_path.suffix in ['.yaml', '.yml']:
                     if not HAS_YAML:
                         raise ImportError("pyyaml is required for YAML config. Install with: pip install pyyaml")
-                    return yaml.safe_load(f) or {}
+                    data: dict[str, Any] = yaml.safe_load(f) or {}
+                    return data
                 else:
-                    return json.load(f)
+                    data_json: dict[str, Any] = json.load(f)
+                    return data_json
 
         default_config: dict[str, Any] = {
             "included_repos": [],  # If set, ONLY show these repos (whitelist)
@@ -91,7 +93,7 @@ class Config:
     def get_sonar_token(self) -> str | None:
         """Get SonarQube token from config or pass."""
         # Try direct token first
-        token = self.data.get("sonar_token")
+        token: str | None = self.data.get("sonar_token")
         if token:
             return token
 

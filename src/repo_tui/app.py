@@ -684,17 +684,13 @@ class RepoOverviewApp(App[None]):
                 return self.query_one("#repo-list", RepoListWidget)
             else:
                 return self.query_one("#repo-grid", RepoGridWidget)
-        except Exception as e:
+        except Exception:
             # Widget might not exist during transition
             return None
 
     async def action_switch_view_list(self) -> None:
         """Switch to list view."""
         if self.view_mode != "list":
-            # Remember selected repo
-            current_widget = self._get_current_widget()
-            selected_repo = current_widget.get_selected_repo() if current_widget else None
-
             # Switch view mode
             self.view_mode = "list"
             await self.recompose()
@@ -707,10 +703,6 @@ class RepoOverviewApp(App[None]):
     async def action_switch_view_grid(self) -> None:
         """Switch to grid view."""
         if self.view_mode != "grid":
-            # Remember selected repo
-            current_widget = self._get_current_widget()
-            selected_repo = current_widget.get_selected_repo() if current_widget else None
-
             # Switch view mode
             self.view_mode = "grid"
             await self.recompose()
@@ -922,7 +914,7 @@ class RepoOverviewApp(App[None]):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                status_bar.update(f"Opening in browser...")
+                status_bar.update("Opening in browser...")
             except Exception as e:
                 status_bar.update(f"Error opening browser: {e}")
 

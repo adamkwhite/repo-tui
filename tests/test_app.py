@@ -1,6 +1,5 @@
 """Basic smoke tests for the app."""
 
-import pytest
 from repo_tui.app import RepoOverviewApp
 
 
