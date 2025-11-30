@@ -12,7 +12,7 @@ on:
 
 jobs:
   sonarcloud:
-    name: SonarCloud Scan
+    name: Run Tests & Submit to SonarCloud
     runs-on: ubuntu-latest
 
     steps:
