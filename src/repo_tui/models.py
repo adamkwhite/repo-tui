@@ -74,6 +74,14 @@ class RepoOverview:
     has_uncommitted_changes: bool = False  # True if local repo has uncommitted changes
     current_branch: str | None = None  # Current git branch if local repo exists
     description: str | None = None  # Repository description
+    friendly_name: str | None = None  # User-configured friendly display name
+
+    @property
+    def display_name(self) -> str:
+        """Get the display name (friendly name if set, otherwise repo name)."""
+        if self.friendly_name:
+            return f"{self.friendly_name} [dim]({self.name})[/dim]"
+        return self.name
 
     @property
     def cloud_env(self) -> str | None:

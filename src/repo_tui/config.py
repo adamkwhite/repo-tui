@@ -54,6 +54,7 @@ class Config:
             "sonar_token_pass": None,  # SonarQube token from pass (e.g., "work/sonarqube")
             "claude_command": "claude",  # Claude CLI command (e.g., "claude" or full path)
             "debug": False,  # Enable debug logging (sonar, claude launcher, etc.)
+            "friendly_names": {},  # Map repo names to friendly display names
         }
         self._save_config(default_config)
         return default_config
@@ -117,3 +118,8 @@ class Config:
                 return None
 
         return None
+
+    def get_friendly_name(self, repo_name: str) -> str | None:
+        """Get the friendly name for a repository, or None if not configured."""
+        friendly_names: dict[str, str] = self.data.get("friendly_names", {})
+        return friendly_names.get(repo_name)

@@ -465,6 +465,7 @@ async def fetch_all_repos(
             has_uncommitted_changes=has_uncommitted,
             current_branch=current_branch,
             description=description,
+            friendly_name=config.get_friendly_name(repo_name),
         )
 
     # Process in batches to avoid overwhelming the API
@@ -529,6 +530,7 @@ async def fetch_single_repo(
         details_loaded=True,
         has_uncommitted_changes=has_uncommitted,
         current_branch=current_branch,
+        friendly_name=config.get_friendly_name(repo_name),
     )
 
 

@@ -140,7 +140,7 @@ class RepoListWidget(OptionList):
             sonar_info = " [dim]No Sonar[/dim]"
 
         text = Text.from_markup(
-            f"{icon} {expand_icon} {repo.name}{lang_tag}{cloud_tag}{counts_badge}{local}{sonar_info}"
+            f"{icon} {expand_icon} {repo.display_name}{lang_tag}{cloud_tag}{counts_badge}{local}{sonar_info}"
         )
         return Option(text, id=f"repo:{repo.name}")
 
