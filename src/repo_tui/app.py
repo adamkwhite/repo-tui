@@ -6,7 +6,7 @@ import asyncio
 import atexit
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -668,7 +668,18 @@ class RepoOverviewApp(App[None]):
             if loading_screen:
                 loading_screen.update_message(f"Fetching {current}/{total}", repo_name)
 
+        # Save existing sonar status before refresh
+        old_sonar_status: dict[str, tuple[Any, bool]] = {}
+        for repo in self.repos:
+            if repo.sonar_checked:
+                old_sonar_status[repo.name] = (repo.sonar_status, repo.sonar_checked)
+
         self.repos = await fetch_all_repos(self.config, self.check_sonar, progress_callback)
+
+        # Restore sonar status to refreshed repos
+        for repo in self.repos:
+            if repo.name in old_sonar_status:
+                repo.sonar_status, repo.sonar_checked = old_sonar_status[repo.name]
 
         repo_list = self.query_one("#repo-list", RepoListWidget)
         repo_list.set_repos(self.repos)
