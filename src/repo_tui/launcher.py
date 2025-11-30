@@ -99,6 +99,7 @@ def launch_claude(
         if config.data.get("debug", False):  # Reuse debug flag
             with open("/tmp/claude-launch-debug.log", "a") as f:
                 import datetime
+
                 f.write(f"\n=== {datetime.datetime.now()} ===\n")
                 f.write(f"Repo: {repo.name}\n")
                 f.write(f"Local path: {repo.local_path}\n")
@@ -129,6 +130,7 @@ def launch_claude(
         if config.data.get("debug", False):
             with open("/tmp/claude-launch-debug.log", "a") as f:
                 import traceback
+
                 f.write(f"ERROR: {error_msg}\n")
                 f.write(traceback.format_exc())
         return error_msg

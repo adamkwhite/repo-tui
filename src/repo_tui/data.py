@@ -36,12 +36,14 @@ class GitHubClient:
             if github_org:
                 cmd.append(github_org)
 
-            cmd.extend([
-                "--json",
-                "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description",
-                "--limit",
-                "1000",
-            ])
+            cmd.extend(
+                [
+                    "--json",
+                    "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description",
+                    "--limit",
+                    "1000",
+                ]
+            )
 
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -157,7 +159,11 @@ class GitHubClient:
 
                     if contexts:
                         # Determine overall status
-                        statuses = [c.get("state") or c.get("conclusion") for c in contexts if isinstance(c, dict)]
+                        statuses = [
+                            c.get("state") or c.get("conclusion")
+                            for c in contexts
+                            if isinstance(c, dict)
+                        ]
                         if any(s in ["FAILURE", "failure", "TIMED_OUT"] for s in statuses):
                             checks_status = "FAILURE"
                         elif any(s in ["PENDING", "pending", "IN_PROGRESS"] for s in statuses):
@@ -170,25 +176,27 @@ class GitHubClient:
                 author_login = author_obj.get("login", "unknown")
                 author_name = author_obj.get("name")  # Full name (may be None)
 
-                result.append(PullRequest(
-                    number=pr["number"],
-                    title=pr["title"],
-                    url=pr["url"],
-                    author=author_login,
-                    state=pr["state"],
-                    draft=pr.get("isDraft", False),
-                    labels=[label["name"] for label in pr.get("labels", [])],
-                    body=pr.get("body", ""),
-                    reviewers=reviewers if reviewers else None,
-                    review_decision=pr.get("reviewDecision"),
-                    head_ref=pr.get("headRefName"),
-                    base_ref=pr.get("baseRefName"),
-                    created_at=pr.get("createdAt"),
-                    updated_at=pr.get("updatedAt"),
-                    mergeable=pr.get("mergeable"),
-                    checks_status=checks_status,
-                    author_name=author_name,
-                ))
+                result.append(
+                    PullRequest(
+                        number=pr["number"],
+                        title=pr["title"],
+                        url=pr["url"],
+                        author=author_login,
+                        state=pr["state"],
+                        draft=pr.get("isDraft", False),
+                        labels=[label["name"] for label in pr.get("labels", [])],
+                        body=pr.get("body", ""),
+                        reviewers=reviewers if reviewers else None,
+                        review_decision=pr.get("reviewDecision"),
+                        head_ref=pr.get("headRefName"),
+                        base_ref=pr.get("baseRefName"),
+                        created_at=pr.get("createdAt"),
+                        updated_at=pr.get("updatedAt"),
+                        mergeable=pr.get("mergeable"),
+                        checks_status=checks_status,
+                        author_name=author_name,
+                    )
+                )
 
             with open("/tmp/pr-fetch-debug.log", "a") as f:
                 f.write(f"Returning {len(result)} PRs\n")
@@ -198,6 +206,7 @@ class GitHubClient:
             # Debug: log the error to file
             with open("/tmp/pr-fetch-errors.log", "a") as f:
                 import traceback
+
                 f.write(f"\n=== ERROR fetching PRs for {owner}/{repo} ===\n")
                 f.write(f"Error: {e}\n")
                 f.write(traceback.format_exc())
@@ -234,11 +243,8 @@ class GitHubClient:
                 return (False, None)
 
             # Only count modified/added/deleted tracked files, not untracked files (??)
-            status_lines = stdout.decode().strip().split('\n')
-            has_changes = any(
-                line and not line.startswith('??')
-                for line in status_lines
-            )
+            status_lines = stdout.decode().strip().split("\n")
+            has_changes = any(line and not line.startswith("??") for line in status_lines)
 
             # Get current branch
             proc = await asyncio.create_subprocess_exec(
@@ -296,9 +302,13 @@ class SonarCloudClient:
             # Build dashboard URL
             sonar_url = self.config.data.get("sonar_url")
             if sonar_url:
-                dashboard_url = f"{sonar_url.rstrip('/')}/dashboard?id={urllib.parse.quote(project_key)}"
+                dashboard_url = (
+                    f"{sonar_url.rstrip('/')}/dashboard?id={urllib.parse.quote(project_key)}"
+                )
             else:
-                dashboard_url = f"https://sonarcloud.io/dashboard?id={urllib.parse.quote(project_key)}"
+                dashboard_url = (
+                    f"https://sonarcloud.io/dashboard?id={urllib.parse.quote(project_key)}"
+                )
 
             return SonarStatus(
                 project_key=project_key,
@@ -318,6 +328,7 @@ class SonarCloudClient:
             if self.token:
                 # SonarQube uses Basic auth with token as username and empty password
                 import base64
+
                 credentials = base64.b64encode(f"{self.token}:".encode()).decode()
                 request.add_header("Authorization", f"Basic {credentials}")
 
@@ -392,7 +403,11 @@ async def fetch_all_repos(
         owner = repo_data["owner"]["login"]
 
         # Fetch issues and PRs in parallel for this repo
-        issues_task = github.get_repo_issues(owner, repo_name) if repo_data.get("hasIssuesEnabled", True) else asyncio.sleep(0, result=[])
+        issues_task = (
+            github.get_repo_issues(owner, repo_name)
+            if repo_data.get("hasIssuesEnabled", True)
+            else asyncio.sleep(0, result=[])
+        )
         prs_task = github.get_repo_prs(owner, repo_name)
 
         issues, pull_requests = await asyncio.gather(issues_task, prs_task)
@@ -455,7 +470,7 @@ async def fetch_all_repos(
     # Process in batches to avoid overwhelming the API
     batch_size = 10
     for i in range(0, total, batch_size):
-        batch = repos[i:i + batch_size]
+        batch = repos[i : i + batch_size]
         if progress_callback:
             await progress_callback(i + len(batch), total, f"batch {i // batch_size + 1}")
 

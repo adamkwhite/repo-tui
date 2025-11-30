@@ -33,7 +33,7 @@ def _cleanup_terminal():
         sys.stdout.write("\x1b[?1002l")  # Disable mouse drag tracking
         sys.stdout.write("\x1b[?1003l")  # Disable all mouse tracking
         sys.stdout.write("\x1b[?1006l")  # Disable SGR mouse mode
-        sys.stdout.write("\x1b[?25h")    # Show cursor
+        sys.stdout.write("\x1b[?25h")  # Show cursor
         sys.stdout.flush()
     except Exception:
         pass
@@ -722,7 +722,9 @@ class RepoOverviewApp(App[None]):
 
         selected_repo = current_widget.get_selected_repo()
         if not selected_repo:
-            status_bar.update_stats(len(self.repos), sum(r.open_issues_count for r in self.repos), "No repo selected")
+            status_bar.update_stats(
+                len(self.repos), sum(r.open_issues_count for r in self.repos), "No repo selected"
+            )
             return
 
         loading_screen = LoadingScreen(f"Refreshing {selected_repo.name}...")
@@ -752,7 +754,9 @@ class RepoOverviewApp(App[None]):
 
             total_issues = sum(r.open_issues_count for r in self.repos)
             sonar_indicator = " [SonarCloud ON]" if self.check_sonar else ""
-            status_bar.update_stats(len(self.repos), total_issues, f"Refreshed {selected_repo.name}{sonar_indicator}")
+            status_bar.update_stats(
+                len(self.repos), total_issues, f"Refreshed {selected_repo.name}{sonar_indicator}"
+            )
         finally:
             self.pop_screen()
 
@@ -775,7 +779,9 @@ class RepoOverviewApp(App[None]):
 
         selected_repo = current_widget.get_selected_repo()
         if not selected_repo:
-            status_bar.update_stats(len(self.repos), sum(r.open_issues_count for r in self.repos), "No repo selected")
+            status_bar.update_stats(
+                len(self.repos), sum(r.open_issues_count for r in self.repos), "No repo selected"
+            )
             return
 
         loading_screen = LoadingScreen(f"Checking Sonar for {selected_repo.name}...")
@@ -802,7 +808,9 @@ class RepoOverviewApp(App[None]):
                 current_widget._select_by_id(f"repo:{selected_repo.name}")
 
             total_issues = sum(r.open_issues_count for r in self.repos)
-            status_bar.update_stats(len(self.repos), total_issues, f"Sonar checked: {selected_repo.name}")
+            status_bar.update_stats(
+                len(self.repos), total_issues, f"Sonar checked: {selected_repo.name}"
+            )
         finally:
             self.pop_screen()
 
@@ -815,6 +823,7 @@ class RepoOverviewApp(App[None]):
 
         try:
             from .data import SonarCloudClient
+
             sonar = SonarCloudClient(self.config)
 
             total = len(self.repos)
@@ -1018,7 +1027,12 @@ class RepoOverviewApp(App[None]):
         if result is not None and self.view_mode == "list":
             repo_list = self.query_one("#repo-list", RepoListWidget)
             repo = repo_list.get_selected_repo()
-            if repo and repo.name in repo_list.expanded and repo.pull_requests and result < len(repo.pull_requests):
+            if (
+                repo
+                and repo.name in repo_list.expanded
+                and repo.pull_requests
+                and result < len(repo.pull_requests)
+            ):
                 pr = repo.pull_requests[result]
                 target_id = f"pr:{repo.name}:{pr.number}"
                 repo_list._select_by_id(target_id)
@@ -1033,7 +1047,9 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Terminal UI for GitHub repository overview")
-    parser.add_argument("-s", "--sonar", action="store_true", help="Check SonarCloud/SonarQube status on startup")
+    parser.add_argument(
+        "-s", "--sonar", action="store_true", help="Check SonarCloud/SonarQube status on startup"
+    )
     args = parser.parse_args()
 
     app = RepoOverviewApp(check_sonar=args.sonar)

@@ -124,7 +124,11 @@ class RepoListWidget(OptionList):
         if repo.sonar_status:
             status = repo.sonar_status.status
             if status == "ERROR":
-                failed = [c["metricKey"] for c in repo.sonar_status.conditions if c.get("status") == "ERROR"]
+                failed = [
+                    c["metricKey"]
+                    for c in repo.sonar_status.conditions
+                    if c.get("status") == "ERROR"
+                ]
                 failed_text = ", ".join(failed[:3]) if failed else "Quality Gate"
                 sonar_info = f" [red]✗ {failed_text}[/red]"
             elif status == "WARN":
@@ -135,7 +139,9 @@ class RepoListWidget(OptionList):
             # We checked but no SonarCloud project was found
             sonar_info = " [dim]No Sonar[/dim]"
 
-        text = Text.from_markup(f"{icon} {expand_icon} {repo.name}{lang_tag}{cloud_tag}{counts_badge}{local}{sonar_info}")
+        text = Text.from_markup(
+            f"{icon} {expand_icon} {repo.name}{lang_tag}{cloud_tag}{counts_badge}{local}{sonar_info}"
+        )
         return Option(text, id=f"repo:{repo.name}")
 
     def _build_issue_option(self, repo: RepoOverview, issue: Issue) -> Option:
@@ -151,11 +157,12 @@ class RepoListWidget(OptionList):
         date_str = ""
         if pr.created_at:
             from datetime import datetime
-            date_only = pr.created_at.split('T')[0]
+
+            date_only = pr.created_at.split("T")[0]
 
             # Calculate age in days
             try:
-                created_date = datetime.fromisoformat(pr.created_at.replace('Z', '+00:00'))
+                created_date = datetime.fromisoformat(pr.created_at.replace("Z", "+00:00"))
                 now = datetime.now(UTC)
                 age_days = (now - created_date).days
 
@@ -177,13 +184,17 @@ class RepoListWidget(OptionList):
         # Prefer full name over username
         display_name = pr.author_name if pr.author_name else pr.author
         author = f"[dim]by {display_name}[/dim] " if display_name else ""
-        text = Text.from_markup(f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{pr.title}")
+        text = Text.from_markup(
+            f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{pr.title}"
+        )
         return Option(text, id=f"pr:{repo.name}:{pr.number}")
 
     def _build_empty_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for empty state (no issues or PRs)."""
         desc = repo.description if repo.description else "No description"
-        text = Text.from_markup(f"    [dim]No issues or PRs[/dim]\n    [white italic]{desc}[/white italic]")
+        text = Text.from_markup(
+            f"    [dim]No issues or PRs[/dim]\n    [white italic]{desc}[/white italic]"
+        )
         return Option(text, id=f"empty:{repo.name}", disabled=True)
 
     def toggle_expand(self) -> None:

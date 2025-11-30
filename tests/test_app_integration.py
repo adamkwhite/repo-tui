@@ -96,7 +96,7 @@ async def test_switch_back_to_list_view(sample_repos):
 async def test_grid_view_shows_repos(sample_repos):
     """Test that grid view displays repositories after switching."""
     # Mock the data fetching to prevent real API calls
-    with patch('repo_tui.app.fetch_all_repos', new_callable=AsyncMock) as mock_fetch:
+    with patch("repo_tui.app.fetch_all_repos", new_callable=AsyncMock) as mock_fetch:
         mock_fetch.return_value = sample_repos
 
         app = RepoOverviewApp()
@@ -120,7 +120,7 @@ async def test_grid_view_shows_repos(sample_repos):
                 assert grid_widget is not None
 
                 # Should have repos
-                assert hasattr(grid_widget, 'repos')
+                assert hasattr(grid_widget, "repos")
                 assert len(grid_widget.repos) == 2
             except Exception as e:
                 pytest.fail(f"Grid widget not found or doesn't have repos: {e}")
@@ -151,24 +151,26 @@ async def test_app_does_not_set_mouse_over_to_bool():
         await pilot.pause()
 
         # Check initial state
-        if hasattr(app, 'mouse_over'):
-            assert not isinstance(app.mouse_over, bool), \
+        if hasattr(app, "mouse_over"):
+            assert not isinstance(app.mouse_over, bool), (
                 "mouse_over should not be a boolean, it should be a Widget or None"
+            )
 
         # Try switching views and check again
         await pilot.press("2")
         await pilot.pause()
 
-        if hasattr(app, 'mouse_over'):
-            assert not isinstance(app.mouse_over, bool), \
+        if hasattr(app, "mouse_over"):
+            assert not isinstance(app.mouse_over, bool), (
                 "mouse_over should not be a boolean after view switch"
+            )
 
 
 @pytest.mark.asyncio
 async def test_view_mode_persistence_during_recompose(sample_repos):
     """Test that repos are preserved when switching views."""
     # Mock the data fetching to prevent real API calls
-    with patch('repo_tui.app.fetch_all_repos', new_callable=AsyncMock) as mock_fetch:
+    with patch("repo_tui.app.fetch_all_repos", new_callable=AsyncMock) as mock_fetch:
         mock_fetch.return_value = sample_repos
 
         app = RepoOverviewApp()
