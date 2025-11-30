@@ -80,7 +80,7 @@ class RepoCard(Static):
         # Build card content - always show name prominently
         lines = [
             "",  # Top padding
-            f"[bold white]{repo.name}[/bold white]",
+            f"[bold white]{repo.display_name}[/bold white]",
             "",
         ]
 
