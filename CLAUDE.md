@@ -81,6 +81,21 @@ Test structure:
 - `tests/test_app.py` - Unit tests for initialization and basic attributes
 - `tests/test_app_integration.py` - Integration tests using Textual's Pilot API
 
+### Development Dependencies
+
+The project uses `requirements-dev.txt` for development and CI dependencies:
+- `pytest>=7.4.0`, `pytest-cov>=4.1.0`, `pytest-html>=4.1.0` - Testing framework
+- `pytest-asyncio>=0.21.0` - **Required** for async Textual tests
+- `mypy>=1.5.0` - Type checking
+- `types-PyYAML>=6.0.0` - **Required** for mypy to type-check YAML imports
+- `ruff>=0.3.0` - Linting and formatting
+
+Install with:
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
 ### Testing Patterns
 
 **Always mock data fetching to prevent real API calls:**
@@ -217,3 +232,48 @@ async def test_something():
 2. Lazy loading: issue/PR details loaded on expand
 3. Git status checked per repo if local path exists
 4. SonarCloud checked only if enabled (`-s` flag)
+
+### Null Safety in Widget Operations
+
+**Critical Pattern:** Always check if widget exists before calling methods on it:
+
+```python
+# BAD - Can crash if widget is None
+current_widget = self._get_current_widget()
+current_widget.set_repos(self.repos)  # May crash!
+
+# GOOD - Safe null check
+current_widget = self._get_current_widget()
+if current_widget:
+    current_widget.set_repos(self.repos)
+```
+
+This pattern is especially important in:
+- `action_sonar_all()` (src/repo_tui/app.py:838-840)
+- View switching operations
+- Any operation that calls `_get_current_widget()`
+
+## Current Status
+
+**Branch:** main (all PRs merged as of 2025-11-29)
+
+**Recent Changes:**
+- Fixed CI/CD pipeline by adding `requirements-dev.txt` with all dev dependencies
+- Added null safety check in Sonar All display update to prevent crashes
+- Applied ruff formatting across all Python files
+- All linting, type checking, and test checks now pass in CI
+
+**Technology Stack:**
+- Python 3.13+ (specified in pyproject.toml)
+- Textual 0.40.0+ - Terminal UI framework
+- Rich 13.0.0+ - Terminal formatting
+- PyYAML 6.0+ - YAML config support
+- pytest-asyncio - Async test support (critical for Textual tests)
+
+**Known Issues:**
+- None currently - all CI checks passing
+
+**Next Steps:**
+- Monitor SonarCloud integration for any edge cases
+- Consider adding more comprehensive test coverage for widget operations
+- Potential future enhancement: Support both SonarCloud.io and self-hosted SonarQube simultaneously
