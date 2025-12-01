@@ -577,7 +577,7 @@ class RepoOverviewApp(App[None]):
     }
 
     #help-content {
-        width: 50;
+        width: 90;
         height: auto;
         padding: 1 2;
         background: $surface;
