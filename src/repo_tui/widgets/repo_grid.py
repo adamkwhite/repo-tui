@@ -32,9 +32,11 @@ class RepoCard(Static):
 
         counts_parts = []
         if issue_count > 0:
-            counts_parts.append(f"[cyan]{issue_count}[/cyan] issues")
+            issue_label = "issue" if issue_count == 1 else "issues"
+            counts_parts.append(f"[cyan]{issue_count}[/cyan] {issue_label}")
         if pr_count > 0:
-            counts_parts.append(f"[green]{pr_count}[/green] PRs")
+            pr_label = "PR" if pr_count == 1 else "PRs"
+            counts_parts.append(f"[green]{pr_count}[/green] {pr_label}")
         counts = ", ".join(counts_parts) if counts_parts else "[dim]No issues or PRs[/dim]"
 
         # Git status
