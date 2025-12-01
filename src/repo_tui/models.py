@@ -84,6 +84,24 @@ class RepoOverview:
         return self.name
 
     @property
+    def critical_issue_count(self) -> int:
+        """Count issues with critical labels (bug, security, priority-high, etc.)."""
+        critical_labels = {
+            "bug",
+            "security",
+            "breaking-change",
+            "ci-failure",
+            "priority-high",
+            "status-blocked",
+        }
+        count = 0
+        for issue in self.issues:
+            # Check if issue has any critical label
+            if any(label.lower() in critical_labels for label in issue.labels):
+                count += 1
+        return count
+
+    @property
     def cloud_env(self) -> str | None:
         """Extract cloud environment from topics."""
         if not self.topics:

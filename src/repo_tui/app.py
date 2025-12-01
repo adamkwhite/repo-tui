@@ -6,7 +6,7 @@ import asyncio
 import atexit
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -49,6 +49,9 @@ HELP_TEXT = """
 [cyan]Navigation[/cyan]
   j/k or ↑/↓    Move up/down
   Space         Expand/collapse repo issues
+  1             Switch to list view
+  2             Switch to grid view
+  3             Switch to Jira view (if configured)
 
 [cyan]Actions[/cyan]
   c             Launch Claude Code
@@ -61,6 +64,14 @@ HELP_TEXT = """
   q             Quit
   ?             Show this help
 
+[cyan]Status Indicators (colored dots)[/cyan]
+  [red]●[/red]             Sonar ERROR or 5+ critical issues (bugs/security)
+  [yellow]●[/yellow]             Sonar WARN, uncommitted changes, or 1-4 critical issues
+  [blue]●[/blue]             Active PRs or work in progress
+  [green]●[/green]             Clean (no issues or uncommitted work)
+
+[dim]Critical labels: bug, security, breaking-change, ci-failure, priority-high, status-blocked[/dim]
+[dim]Note: Terminal color schemes may render yellow as orange, blue as purple[/dim]
 [dim]Press any key to close[/dim]
 """
 
@@ -566,7 +577,7 @@ class RepoOverviewApp(App[None]):
     }
 
     #help-content {
-        width: 50;
+        width: 90;
         height: auto;
         padding: 1 2;
         background: $surface;
@@ -668,7 +679,18 @@ class RepoOverviewApp(App[None]):
             if loading_screen:
                 loading_screen.update_message(f"Fetching {current}/{total}", repo_name)
 
+        # Save existing sonar status before refresh
+        old_sonar_status: dict[str, tuple[Any, bool]] = {}
+        for repo in self.repos:
+            if repo.sonar_checked:
+                old_sonar_status[repo.name] = (repo.sonar_status, repo.sonar_checked)
+
         self.repos = await fetch_all_repos(self.config, self.check_sonar, progress_callback)
+
+        # Restore sonar status to refreshed repos
+        for repo in self.repos:
+            if repo.name in old_sonar_status:
+                repo.sonar_status, repo.sonar_checked = old_sonar_status[repo.name]
 
         repo_list = self.query_one("#repo-list", RepoListWidget)
         repo_list.set_repos(self.repos)
