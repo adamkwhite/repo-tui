@@ -120,9 +120,11 @@ class RepoListWidget(OptionList):
         # Build counts display
         counts_parts = []
         if pr_count > 0:
-            counts_parts.append(f"{pr_count} PRs")
+            pr_label = "PR" if pr_count == 1 else "PRs"
+            counts_parts.append(f"{pr_count} {pr_label}")
         if issue_count > 0:
-            counts_parts.append(f"{issue_count} issues")
+            issue_label = "issue" if issue_count == 1 else "issues"
+            counts_parts.append(f"{issue_count} {issue_label}")
         counts_badge = f" [dim]{', '.join(counts_parts)}[/dim]" if counts_parts else ""
 
         # Local/remote indicator with branch info
