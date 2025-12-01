@@ -69,27 +69,48 @@ class RepoListWidget(OptionList):
     def _get_priority(self, repo: RepoOverview) -> int:
         """Calculate sort priority for a repo."""
         priority = 0
-        if repo.sonar_status:
-            if repo.sonar_status.status == "ERROR":
-                priority += 1000
-            elif repo.sonar_status.status == "WARN":
-                priority += 100
+
+        # Highest priority: Sonar errors
+        if repo.sonar_status and repo.sonar_status.status == "ERROR":
+            priority += 10000
+
+        # High priority: Critical issues (bugs, security)
+        priority += repo.critical_issue_count * 100
+
+        # Medium priority: Sonar warnings
+        if repo.sonar_status and repo.sonar_status.status == "WARN":
+            priority += 500
+
+        # Lower priority: Uncommitted changes
+        if repo.has_uncommitted_changes:
+            priority += 50
+
+        # Lowest priority: Total issue count (for tiebreaking)
         priority += repo.open_issues_count
+
         return priority
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""
+        # Priority 1: Sonar status (actual code quality issues)
         if repo.sonar_status and repo.sonar_status.status == "ERROR":
+            icon = "[red]●[/red]"
+        elif repo.critical_issue_count >= 5:
+            # Priority 2: High number of critical issues (bugs, security, etc.)
             icon = "[red]●[/red]"
         elif repo.sonar_status and repo.sonar_status.status == "WARN":
             icon = "[yellow]●[/yellow]"
-        elif repo.open_issues_count >= 10:
-            icon = "[red]●[/red]"
-        elif repo.open_issues_count >= 5:
+        elif repo.has_uncommitted_changes:
+            # Priority 3: Uncommitted work (needs attention)
             icon = "[yellow]●[/yellow]"
-        elif repo.open_issues_count > 0:
+        elif repo.critical_issue_count > 0:
+            # Priority 4: Some critical issues
+            icon = "[yellow]●[/yellow]"
+        elif repo.pull_requests:
+            # Priority 5: Active PRs (work in progress)
             icon = "[blue]●[/blue]"
         else:
+            # Clean state
             icon = "[green]●[/green]"
 
         expand_icon = "▼" if repo.name in self.expanded else "▶"

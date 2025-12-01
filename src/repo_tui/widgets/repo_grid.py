@@ -193,22 +193,23 @@ class RepoGridWidget(VerticalScroll):
         """Calculate sort priority for a repo (same as list view)."""
         priority = 0
 
-        # SonarCloud failures get highest priority
+        # Highest priority: Sonar errors
         if repo.sonar_status and repo.sonar_status.status == "ERROR":
-            priority += 1000
+            priority += 10000
 
-        # Uncommitted changes
-        if repo.has_uncommitted_changes:
+        # High priority: Critical issues (bugs, security)
+        priority += repo.critical_issue_count * 100
+
+        # Medium priority: Sonar warnings
+        if repo.sonar_status and repo.sonar_status.status == "WARN":
             priority += 500
 
-        # Issue/PR count
-        priority += repo.open_issues_count * 10
-        if repo.pull_requests:
-            priority += len(repo.pull_requests) * 10
+        # Lower priority: Uncommitted changes
+        if repo.has_uncommitted_changes:
+            priority += 50
 
-        # Local repos higher priority
-        if repo.local_path:
-            priority += 100
+        # Lowest priority: Total issue count (for tiebreaking)
+        priority += repo.open_issues_count
 
         return priority
 

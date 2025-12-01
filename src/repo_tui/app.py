@@ -49,6 +49,9 @@ HELP_TEXT = """
 [cyan]Navigation[/cyan]
   j/k or ↑/↓    Move up/down
   Space         Expand/collapse repo issues
+  1             Switch to list view
+  2             Switch to grid view
+  3             Switch to Jira view (if configured)
 
 [cyan]Actions[/cyan]
   c             Launch Claude Code
@@ -61,6 +64,14 @@ HELP_TEXT = """
   q             Quit
   ?             Show this help
 
+[cyan]Status Indicators (colored dots)[/cyan]
+  [red]●[/red]             Sonar ERROR or 5+ critical issues (bugs/security)
+  [yellow]●[/yellow]             Sonar WARN, uncommitted changes, or 1-4 critical issues
+  [blue]●[/blue]             Active PRs or work in progress
+  [green]●[/green]             Clean (no issues or uncommitted work)
+
+[dim]Critical labels: bug, security, breaking-change, ci-failure, priority-high, status-blocked[/dim]
+[dim]Note: Terminal color schemes may render yellow as orange, blue as purple[/dim]
 [dim]Press any key to close[/dim]
 """
 
