@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload coverage to artifacts
         if: matrix.python-version == '3.13' && hashFiles('htmlcov/**') != ''
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-report
           path: htmlcov/
@@ -141,7 +141,7 @@ jobs:
 
       - name: Upload test report to artifacts
         if: matrix.python-version == '3.13' && hashFiles('test-report.html') != ''
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-report
           path: test-report.html
