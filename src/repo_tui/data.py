@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .config import Config
 from .models import Issue, PullRequest, RepoOverview, SonarStatus
@@ -17,6 +19,90 @@ if TYPE_CHECKING:
     pass
 
 ProgressCallback = Callable[[int, int, str], Coroutine[Any, Any, None]]
+
+CACHE_DIR = Path("~/.cache/repo-tui").expanduser()
+CACHE_FILE = CACHE_DIR / "repos.json"
+
+
+class NetworkError(Exception):
+    """Raised when GitHub API calls fail due to network issues."""
+
+
+class FetchResult(NamedTuple):
+    """Result of fetch_all_repos with cache metadata."""
+
+    repos: list[RepoOverview]
+    is_cached: bool
+    cache_timestamp: str | None
+
+
+def save_cache(repos: list[RepoOverview]) -> None:
+    """Write repos to local cache with timestamp."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "repos": [dataclasses.asdict(r) for r in repos],
+    }
+    CACHE_FILE.write_text(json.dumps(payload, default=str))
+
+
+def load_cache() -> tuple[list[RepoOverview], str] | None:
+    """Load cached repos. Returns (repos, timestamp_str) or None."""
+    if not CACHE_FILE.exists():
+        return None
+    try:
+        data = json.loads(CACHE_FILE.read_text())
+        repos = [_dict_to_repo(r) for r in data["repos"]]
+        return repos, data["timestamp"]
+    except Exception:
+        return None
+
+
+def _dict_to_repo(d: dict) -> RepoOverview:
+    """Reconstruct a RepoOverview from a dict."""
+    issues = [Issue(**i) for i in d.get("issues", [])]
+    prs = [PullRequest(**p) for p in d["pull_requests"]] if d.get("pull_requests") else None
+    sonar = SonarStatus(**d["sonar_status"]) if d.get("sonar_status") else None
+    return RepoOverview(
+        name=d["name"],
+        owner=d["owner"],
+        url=d["url"],
+        open_issues_count=d["open_issues_count"],
+        issues=issues,
+        sonar_status=sonar,
+        local_path=d.get("local_path"),
+        sonar_checked=d.get("sonar_checked", False),
+        language=d.get("language"),
+        topics=d.get("topics"),
+        pull_requests=prs,
+        details_loaded=d.get("details_loaded", False),
+        has_uncommitted_changes=d.get("has_uncommitted_changes", False),
+        current_branch=d.get("current_branch"),
+        description=d.get("description"),
+        friendly_name=d.get("friendly_name"),
+        pushed_at=d.get("pushed_at"),
+    )
+
+
+def format_cache_age(timestamp: str | None) -> str:
+    """Format a cache timestamp as relative time."""
+    if not timestamp:
+        return "unknown age"
+    try:
+        cached_time = datetime.fromisoformat(timestamp)
+        delta = datetime.now(UTC) - cached_time
+        minutes = int(delta.total_seconds() // 60)
+        if minutes < 1:
+            return "just now"
+        if minutes < 60:
+            return f"{minutes}m ago"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours}h ago"
+        days = hours // 24
+        return f"{days}d ago"
+    except (ValueError, AttributeError):
+        return "unknown age"
 
 
 class GitHubClient:
@@ -39,7 +125,7 @@ class GitHubClient:
             cmd.extend(
                 [
                     "--json",
-                    "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description",
+                    "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description,pushedAt",
                     "--limit",
                     "1000",
                 ]
@@ -53,14 +139,16 @@ class GitHubClient:
             stdout, _ = await proc.communicate()
 
             if proc.returncode != 0:
-                return []
+                raise NetworkError(f"gh repo list failed (exit {proc.returncode})")
 
             repos: list[dict[str, Any]] = json.loads(stdout.decode())
             for repo in repos:
                 repo["openIssuesCount"] = 0
             return repos
-        except Exception:
-            return []
+        except NetworkError:
+            raise
+        except Exception as e:
+            raise NetworkError(str(e)) from e
 
     async def get_repo_issues(self, owner: str, repo: str) -> list[Issue]:
         """Get open issues for a repository."""
@@ -375,7 +463,7 @@ async def fetch_all_repos(
     check_sonar: bool = False,
     progress_callback: ProgressCallback | None = None,
     limit: int = 0,
-) -> list[RepoOverview]:
+) -> FetchResult:
     """Fetch all repository data asynchronously.
 
     Args:
@@ -383,11 +471,32 @@ async def fetch_all_repos(
         check_sonar: Whether to check SonarCloud status
         progress_callback: Optional async callback(current, total, repo_name)
         limit: Max repos to fetch (0 = unlimited, for debugging)
+
+    Returns:
+        FetchResult with repos, is_cached flag, and cache timestamp.
     """
     github = GitHubClient(config)
     sonar = SonarCloudClient(config)
 
-    repos = await github.get_user_repos()
+    try:
+        repos = await github.get_user_repos()
+    except NetworkError:
+        # Network down - fall back to cache
+        cached = load_cache()
+        if cached:
+            cached_repos, timestamp = cached
+            cached_repos = [r for r in cached_repos if config.should_include_repo(r.name)]
+            # Refresh git status for local repos (works offline)
+            for repo in cached_repos:
+                if repo.local_path:
+                    local_path = Path(repo.local_path)
+                    if local_path.exists():
+                        has_changes, branch = await github.get_git_status(local_path)
+                        repo.has_uncommitted_changes = has_changes
+                        repo.current_branch = branch
+            return FetchResult(repos=cached_repos, is_cached=True, cache_timestamp=timestamp)
+        return FetchResult(repos=[], is_cached=True, cache_timestamp=None)
+
     overviews: list[RepoOverview] = []
 
     repos = [r for r in repos if config.should_include_repo(r["name"])]
@@ -418,6 +527,7 @@ async def fetch_all_repos(
         topics_data = repo_data.get("repositoryTopics", [])
         topics = [t["name"] for t in topics_data] if topics_data else None
         description = repo_data.get("description")
+        pushed_at = repo_data.get("pushedAt")
 
         # Check git status if repo is local
         has_uncommitted = False
@@ -466,6 +576,7 @@ async def fetch_all_repos(
             current_branch=current_branch,
             description=description,
             friendly_name=config.get_friendly_name(repo_name),
+            pushed_at=pushed_at,
         )
 
     # Process in batches to avoid overwhelming the API
@@ -478,7 +589,10 @@ async def fetch_all_repos(
         batch_results = await asyncio.gather(*[fetch_repo_data(r) for r in batch])
         overviews.extend(batch_results)
 
-    return overviews
+    # Save to cache on successful fetch
+    save_cache(overviews)
+
+    return FetchResult(repos=overviews, is_cached=False, cache_timestamp=None)
 
 
 async def fetch_single_repo(

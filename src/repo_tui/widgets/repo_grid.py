@@ -95,6 +95,10 @@ class RepoCard(Static):
         lines.append(counts)
         lines.append(git_status)
 
+        # Last push date
+        if repo.pushed_at_relative:
+            lines.append(f"[dim]{repo.pushed_at_relative}[/dim]")
+
         # Bottom line: sonar and/or activity
         bottom_parts = []
         if sonar_info:
@@ -191,7 +195,7 @@ class RepoGridWidget(VerticalScroll):
         if self._cards:
             self._cards[0].focus()
 
-    def _get_priority(self, repo: RepoOverview) -> int:
+    def _get_priority(self, repo: RepoOverview) -> tuple[int, str]:
         """Calculate sort priority for a repo (same as list view)."""
         priority = 0
 
@@ -213,7 +217,10 @@ class RepoGridWidget(VerticalScroll):
         # Lowest priority: Total issue count (for tiebreaking)
         priority += repo.open_issues_count
 
-        return priority
+        # Secondary sort: most recently pushed first
+        pushed_at = repo.pushed_at or ""
+
+        return (priority, pushed_at)
 
     def get_selected_repo(self) -> RepoOverview | None:
         """Get the currently selected repository."""

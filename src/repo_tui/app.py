@@ -16,7 +16,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, LoadingIndicator, Static
 
 from .config import Config
-from .data import fetch_all_repos, fetch_single_repo
+from .data import fetch_all_repos, fetch_single_repo, format_cache_age
 from .launcher import launch_claude
 from .models import Issue, PullRequest
 from .widgets.repo_grid import RepoGridWidget
@@ -614,6 +614,7 @@ class RepoOverviewApp(App[None]):
         self.repos: list[RepoOverview] = []
         self.check_sonar = check_sonar
         self.view_mode = "list"  # "list" or "grid"
+        self.is_cached = False
 
     def compose(self) -> ComposeResult:
         """Create the UI layout."""
@@ -685,7 +686,9 @@ class RepoOverviewApp(App[None]):
             if repo.sonar_checked:
                 old_sonar_status[repo.name] = (repo.sonar_status, repo.sonar_checked)
 
-        self.repos = await fetch_all_repos(self.config, self.check_sonar, progress_callback)
+        result = await fetch_all_repos(self.config, self.check_sonar, progress_callback)
+        self.repos = result.repos
+        self.is_cached = result.is_cached
 
         # Restore sonar status to refreshed repos
         for repo in self.repos:
@@ -697,7 +700,16 @@ class RepoOverviewApp(App[None]):
 
         total_issues = sum(r.open_issues_count for r in self.repos)
         sonar_indicator = " [SonarCloud ON]" if self.check_sonar else ""
-        status_bar.update_stats(len(self.repos), total_issues, f"Ready{sonar_indicator}")
+
+        if result.is_cached:
+            cache_age = format_cache_age(result.cache_timestamp)
+            if result.repos:
+                status_msg = f"[yellow]OFFLINE - cached {cache_age}[/yellow]{sonar_indicator}"
+            else:
+                status_msg = "[yellow]OFFLINE - no cache available[/yellow]"
+            status_bar.update_stats(len(self.repos), total_issues, status_msg)
+        else:
+            status_bar.update_stats(len(self.repos), total_issues, f"Ready{sonar_indicator}")
 
     def _get_current_widget(self):
         """Get the current view widget (list or grid)."""
