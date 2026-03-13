@@ -42,7 +42,7 @@ class RepoListWidget(OptionList):
 
         sorted_repos = sorted(
             self.repos,
-            key=lambda r: self._get_priority(r),
+            key=lambda r: r.pushed_at or "",
             reverse=True,
         )
 
@@ -65,33 +65,6 @@ class RepoListWidget(OptionList):
                 if not repo.pull_requests and not repo.issues:
                     empty_option = self._build_empty_option(repo)
                     self.add_option(empty_option)
-
-    def _get_priority(self, repo: RepoOverview) -> tuple[int, str]:
-        """Calculate sort priority for a repo. Returns (priority, pushed_at) for sorting."""
-        priority = 0
-
-        # Highest priority: Sonar errors
-        if repo.sonar_status and repo.sonar_status.status == "ERROR":
-            priority += 10000
-
-        # High priority: Critical issues (bugs, security)
-        priority += repo.critical_issue_count * 100
-
-        # Medium priority: Sonar warnings
-        if repo.sonar_status and repo.sonar_status.status == "WARN":
-            priority += 500
-
-        # Lower priority: Uncommitted changes
-        if repo.has_uncommitted_changes:
-            priority += 50
-
-        # Lowest priority: Total issue count (for tiebreaking)
-        priority += repo.open_issues_count
-
-        # Secondary sort: most recently pushed first
-        pushed_at = repo.pushed_at or ""
-
-        return (priority, pushed_at)
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""
