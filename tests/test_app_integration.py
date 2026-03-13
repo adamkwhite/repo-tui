@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from repo_tui.app import RepoOverviewApp
+from repo_tui.data import FetchResult
 from repo_tui.models import RepoOverview
 
 
@@ -97,7 +98,9 @@ async def test_grid_view_shows_repos(sample_repos):
     """Test that grid view displays repositories after switching."""
     # Mock the data fetching to prevent real API calls
     with patch("repo_tui.app.fetch_all_repos", new_callable=AsyncMock) as mock_fetch:
-        mock_fetch.return_value = sample_repos
+        mock_fetch.return_value = FetchResult(
+            repos=sample_repos, is_cached=False, cache_timestamp=None
+        )
 
         app = RepoOverviewApp()
 
@@ -171,7 +174,9 @@ async def test_view_mode_persistence_during_recompose(sample_repos):
     """Test that repos are preserved when switching views."""
     # Mock the data fetching to prevent real API calls
     with patch("repo_tui.app.fetch_all_repos", new_callable=AsyncMock) as mock_fetch:
-        mock_fetch.return_value = sample_repos
+        mock_fetch.return_value = FetchResult(
+            repos=sample_repos, is_cached=False, cache_timestamp=None
+        )
 
         app = RepoOverviewApp()
 
