@@ -66,8 +66,8 @@ class RepoListWidget(OptionList):
                     empty_option = self._build_empty_option(repo)
                     self.add_option(empty_option)
 
-    def _get_priority(self, repo: RepoOverview) -> int:
-        """Calculate sort priority for a repo."""
+    def _get_priority(self, repo: RepoOverview) -> tuple[int, str]:
+        """Calculate sort priority for a repo. Returns (priority, pushed_at) for sorting."""
         priority = 0
 
         # Highest priority: Sonar errors
@@ -88,7 +88,10 @@ class RepoListWidget(OptionList):
         # Lowest priority: Total issue count (for tiebreaking)
         priority += repo.open_issues_count
 
-        return priority
+        # Secondary sort: most recently pushed first
+        pushed_at = repo.pushed_at or ""
+
+        return (priority, pushed_at)
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""
@@ -162,8 +165,13 @@ class RepoListWidget(OptionList):
             # We checked but no SonarCloud project was found
             sonar_info = " [dim]No Sonar[/dim]"
 
+        # Last push date
+        pushed_tag = ""
+        if repo.pushed_at_relative:
+            pushed_tag = f" [dim]{repo.pushed_at_relative}[/dim]"
+
         text = Text.from_markup(
-            f"{icon} {expand_icon} {repo.display_name}{lang_tag}{cloud_tag}{counts_badge}{local}{sonar_info}"
+            f"{icon} {expand_icon} {repo.display_name}{lang_tag}{cloud_tag}{counts_badge}{local}{pushed_tag}{sonar_info}"
         )
         return Option(text, id=f"repo:{repo.name}")
 

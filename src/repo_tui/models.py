@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -75,6 +76,34 @@ class RepoOverview:
     current_branch: str | None = None  # Current git branch if local repo exists
     description: str | None = None  # Repository description
     friendly_name: str | None = None  # User-configured friendly display name
+    pushed_at: str | None = None  # Last push date (ISO 8601)
+
+    @property
+    def pushed_at_relative(self) -> str | None:
+        """Get a human-readable relative time for last push (e.g. '2d ago')."""
+        if not self.pushed_at:
+            return None
+        try:
+            pushed = datetime.fromisoformat(self.pushed_at.replace("Z", "+00:00"))
+            delta = datetime.now(UTC) - pushed
+            days = delta.days
+            if days == 0:
+                hours = delta.seconds // 3600
+                if hours == 0:
+                    return "just now"
+                return f"{hours}h ago"
+            if days < 7:
+                return f"{days}d ago"
+            if days < 30:
+                weeks = days // 7
+                return f"{weeks}w ago"
+            if days < 365:
+                months = days // 30
+                return f"{months}mo ago"
+            years = days // 365
+            return f"{years}y ago"
+        except (ValueError, AttributeError):
+            return None
 
     @property
     def display_name(self) -> str:
