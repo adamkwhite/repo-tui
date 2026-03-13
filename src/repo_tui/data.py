@@ -486,6 +486,7 @@ async def fetch_all_repos(
         if cached:
             cached_repos, timestamp = cached
             cached_repos = [r for r in cached_repos if config.should_include_repo(r.name)]
+            cached_repos.sort(key=lambda r: r.pushed_at or "", reverse=True)
             # Refresh git status for local repos (works offline)
             for repo in cached_repos:
                 if repo.local_path:
@@ -588,6 +589,9 @@ async def fetch_all_repos(
 
         batch_results = await asyncio.gather(*[fetch_repo_data(r) for r in batch])
         overviews.extend(batch_results)
+
+    # Sort by most recently pushed first
+    overviews.sort(key=lambda r: r.pushed_at or "", reverse=True)
 
     # Save to cache on successful fetch
     save_cache(overviews)
