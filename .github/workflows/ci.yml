@@ -3,9 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore']
   pull_request:
     branches: [main]
+    paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore']
   workflow_dispatch:  # Allow manual triggers
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:

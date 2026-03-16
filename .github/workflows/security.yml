@@ -1,8 +1,6 @@
 name: Security Scanning
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -10,9 +8,14 @@ on:
     - cron: '0 9 * * 1'
   workflow_dispatch:  # Allow manual triggers
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   security-scan:
     name: Security Analysis
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
