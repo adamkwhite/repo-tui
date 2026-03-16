@@ -17,7 +17,7 @@ concurrency:
 jobs:
   sonarcloud:
     name: Run Tests & Submit to SonarCloud
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
