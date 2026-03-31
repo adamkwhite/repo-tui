@@ -203,6 +203,9 @@ dmyp.json
 # - .claude/settings.local.json is local only (personal overrides)
 .claude/settings.local.json
 
+# Windows Terminal launcher (machine-specific hardcoded path)
+launch.sh
+
 # ==============================================================================
 # SONARCLOUD
 # ==============================================================================
