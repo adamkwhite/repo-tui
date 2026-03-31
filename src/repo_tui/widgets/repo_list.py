@@ -51,6 +51,10 @@ class RepoListWidget(OptionList):
             self.add_option(option)
 
             if repo.name in self.expanded:
+                # Show description first
+                desc_option = self._build_description_option(repo)
+                self.add_option(desc_option)
+
                 # Show PRs and issues
                 if repo.pull_requests:
                     for pr in repo.pull_requests:
@@ -60,11 +64,6 @@ class RepoListWidget(OptionList):
                     for issue in repo.issues:
                         issue_option = self._build_issue_option(repo, issue)
                         self.add_option(issue_option)
-
-                # If no PRs or issues, show empty state with description
-                if not repo.pull_requests and not repo.issues:
-                    empty_option = self._build_empty_option(repo)
-                    self.add_option(empty_option)
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""
@@ -193,13 +192,11 @@ class RepoListWidget(OptionList):
         )
         return Option(text, id=f"pr:{repo.name}:{pr.number}")
 
-    def _build_empty_option(self, repo: RepoOverview) -> Option:
-        """Build a rich option for empty state (no issues or PRs)."""
+    def _build_description_option(self, repo: RepoOverview) -> Option:
+        """Build a rich option for the repo description."""
         desc = repo.description if repo.description else "No description"
-        text = Text.from_markup(
-            f"    [dim]No issues or PRs[/dim]\n    [white italic]{desc}[/white italic]"
-        )
-        return Option(text, id=f"empty:{repo.name}", disabled=True)
+        text = Text.from_markup(f"    [white italic]{desc}[/white italic]")
+        return Option(text, id=f"desc:{repo.name}", disabled=True)
 
     def toggle_expand(self) -> None:
         """Toggle expand/collapse for currently selected repo."""
