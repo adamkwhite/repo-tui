@@ -78,11 +78,31 @@ def test_shorten_reason_known_patterns():
 
 
 @pytest.mark.asyncio
-async def test_merger_skips_repos_without_cached_dependabot_prs():
+async def test_merger_emits_empty_done_for_repos_without_dependabot_prs():
+    """Every repo should emit a done event so the modal can log it was checked."""
     repos = [_make_repo("no-deps", prs=[])]
     progress = [p async for p in merge_all_dependabot_prs(repos)]
-    # One scanning event, no "done" event (skipped).
-    assert [p.phase for p in progress] == ["scanning"]
+    # Scanning, then done with empty results (nothing to merge, but logged).
+    assert [p.phase for p in progress] == ["scanning", "done"]
+    done = progress[1]
+    assert done.repo_name == "no-deps"
+    assert done.results == []
+
+
+@pytest.mark.asyncio
+async def test_merger_emits_empty_done_when_live_query_returns_nothing():
+    """Repo had cached Dependabot PRs but live query finds none (already merged)."""
+    repos = [_make_repo("stale-cache", prs=[_dependabot_pr(1)])]
+
+    with patch(
+        "repo_tui.dependabot._list_dependabot_prs",
+        new=AsyncMock(return_value=[]),
+    ):
+        progress = [p async for p in merge_all_dependabot_prs(repos)]
+
+    done = next(p for p in progress if p.phase == "done")
+    assert done.repo_name == "stale-cache"
+    assert done.results == []
 
 
 @pytest.mark.asyncio

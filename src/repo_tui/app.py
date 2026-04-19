@@ -610,6 +610,7 @@ class DependabotMergeScreen(ModalScreen[None]):
 
             if progress.phase == "done":
                 if not progress.results:
+                    self._append_log(f"[dim]- {progress.repo_name} no open Dependabot PRs[/dim]")
                     continue
                 repos_with_prs += 1
                 successes = [r for r in progress.results if r.success]

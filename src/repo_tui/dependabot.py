@@ -146,10 +146,12 @@ async def merge_all_dependabot_prs(
 
         has_cached = any(_is_dependabot_author(pr.author) for pr in (repo.pull_requests or []))
         if not has_cached:
+            yield RepoProgress(repo.name, "done", [])
             continue
 
         prs = await _list_dependabot_prs(repo.owner, repo.name)
         if not prs:
+            yield RepoProgress(repo.name, "done", [])
             continue
 
         results: list[MergeResult] = []
