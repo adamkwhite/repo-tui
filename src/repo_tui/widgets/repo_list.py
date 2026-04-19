@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from ..models import Issue, PullRequest, RepoOverview
 
 
+SPECIAL_ACTION_DEPENDABOT = "dependabot-merge"
+
+
 class RepoListWidget(OptionList):
     """Scrollable list of repositories with status indicators."""
 
@@ -34,11 +37,14 @@ class RepoListWidget(OptionList):
         self.repos = repos
         self._rebuild_options()
         if self.repos:
-            self.highlighted = 0
+            # Land on the first real repo, not the special action row at index 0.
+            self.highlighted = 1
 
     def _rebuild_options(self) -> None:
         """Rebuild the option list from current repos."""
         self.clear_options()
+
+        self.add_option(self._build_dependabot_action_option())
 
         sorted_repos = sorted(
             self.repos,
@@ -64,6 +70,25 @@ class RepoListWidget(OptionList):
                     for issue in repo.issues:
                         issue_option = self._build_issue_option(repo, issue)
                         self.add_option(issue_option)
+
+    def _build_dependabot_action_option(self) -> Option:
+        """Build the special pseudo-row that triggers the Dependabot bulk merger."""
+        text = Text.from_markup(
+            "[bold cyan]⚡ Merge Dependabot PRs[/bold cyan]"
+            " [dim]— bulk-merge across all repos (press Space/Enter)[/dim]"
+        )
+        return Option(text, id=f"action:{SPECIAL_ACTION_DEPENDABOT}")
+
+    def get_selected_special_action(self) -> str | None:
+        """Return the special-action id if the action row is highlighted."""
+        selected = self.highlighted
+        if selected is None:
+            return None
+        option = self.get_option_at_index(selected)
+        option_id: str | None = option.id if option else None
+        if option_id and option_id.startswith("action:"):
+            return option_id.split(":", 1)[1]
+        return None
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""

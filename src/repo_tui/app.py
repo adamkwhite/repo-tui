@@ -13,10 +13,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, LoadingIndicator, Static
+from textual.widgets import Footer, Header, LoadingIndicator, OptionList, Static
 
 from .config import Config
 from .data import fetch_all_repos, fetch_single_repo, format_cache_age
+from .dependabot import MergeResult, merge_all_dependabot_prs
 from .launcher import launch_claude
 from .models import Issue, PullRequest
 from .widgets.repo_grid import RepoGridWidget
@@ -61,6 +62,7 @@ HELP_TEXT = """
   R             Refresh all repos
   s             Check SonarCloud for current repo
   S             Toggle SonarCloud for all repos
+  D             Bulk-merge Dependabot PRs across all repos
   q             Quit
   ?             Show this help
 
@@ -521,6 +523,143 @@ class PRDetailScreen(ModalScreen[int]):
         return text.replace("[", r"\[").replace("]", r"\]")
 
 
+class DependabotMergeScreen(ModalScreen[None]):
+    """Modal that bulk-merges Dependabot PRs and streams per-repo status."""
+
+    BINDINGS = [
+        Binding("escape", "close_modal", "Close"),
+        Binding("q", "close_modal", "Close"),
+    ]
+
+    DEFAULT_CSS = """
+    DependabotMergeScreen {
+        align: center middle;
+    }
+
+    #dependabot-container {
+        width: 90%;
+        height: 85%;
+        max-width: 120;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+
+    #dependabot-title {
+        text-style: bold;
+        height: 1;
+        margin-bottom: 1;
+    }
+
+    #dependabot-status {
+        height: 1;
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #dependabot-log-scroll {
+        height: 1fr;
+        border: solid $secondary;
+        padding: 1;
+    }
+
+    #dependabot-log {
+        width: 100%;
+    }
+
+    #dependabot-footer {
+        dock: bottom;
+        height: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, repos: list[RepoOverview]) -> None:
+        super().__init__()
+        self.target_repos = repos
+        self.log_lines: list[str] = []
+        self.finished = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dependabot-container"):
+            yield Static("Merge Dependabot PRs", id="dependabot-title")
+            yield Static("Starting...", id="dependabot-status")
+            with VerticalScroll(id="dependabot-log-scroll"):
+                yield Static("", id="dependabot-log")
+            yield Static(
+                "[dim]Running — press Esc/q to dismiss when done[/dim]",
+                id="dependabot-footer",
+            )
+
+    def on_mount(self) -> None:
+        self.run_worker(self._run_merger(), exclusive=True)
+
+    async def _run_merger(self) -> None:
+        status = self.query_one("#dependabot-status", Static)
+        total_repos = len(self.target_repos)
+        scanned = 0
+        repos_with_prs = 0
+        merged = 0
+        failed = 0
+
+        async for progress in merge_all_dependabot_prs(self.target_repos):
+            if progress.phase == "scanning":
+                scanned += 1
+                status.update(f"Scanning {scanned}/{total_repos}: {progress.repo_name}")
+                continue
+
+            if progress.phase == "done":
+                if not progress.results:
+                    continue
+                repos_with_prs += 1
+                successes = [r for r in progress.results if r.success]
+                failures = [r for r in progress.results if not r.success]
+
+                for fail in failures:
+                    self._append_log(self._format_failure(progress.repo_name, fail))
+                    failed += 1
+
+                if successes and not failures:
+                    pr_nums = ", ".join(f"#{r.pr_number}" for r in successes)
+                    self._append_log(
+                        f"[green]✓[/green] {progress.repo_name} "
+                        f"All Dependabot PRs Merged ({pr_nums})"
+                    )
+                    merged += len(successes)
+                elif successes:
+                    pr_nums = ", ".join(f"#{r.pr_number}" for r in successes)
+                    self._append_log(
+                        f"[green]✓[/green] {progress.repo_name} "
+                        f"merged {len(successes)} Dependabot PR(s) ({pr_nums})"
+                    )
+                    merged += len(successes)
+
+        self.finished = True
+        summary = (
+            f"Done — scanned {total_repos} repos, "
+            f"{repos_with_prs} had Dependabot PRs, "
+            f"{merged} merged, {failed} failed"
+        )
+        status.update(summary)
+        self._append_log("")
+        self._append_log(f"[bold]{summary}[/bold]")
+        self.query_one("#dependabot-footer", Static).update("[dim]Press Esc/q to close[/dim]")
+
+    def _format_failure(self, repo_name: str, fail: MergeResult) -> str:
+        return (
+            f"[red]✗[/red] {repo_name} "
+            f"PR #{fail.pr_number} unable to merge because of {fail.reason}"
+        )
+
+    def _append_log(self, line: str) -> None:
+        self.log_lines.append(line)
+        self.query_one("#dependabot-log", Static).update("\n".join(self.log_lines))
+        self.query_one("#dependabot-log-scroll", VerticalScroll).scroll_end(animate=False)
+
+    def action_close_modal(self) -> None:
+        self.dismiss()
+
+
 class StatusBar(Static):
     """Status bar showing refresh time and counts."""
 
@@ -594,6 +733,7 @@ class RepoOverviewApp(App[None]):
         Binding("c", "launch", "Claude"),
         Binding("s", "sonar_repo", "Sonar"),
         Binding("S", "sonar_all", "Sonar All"),
+        Binding("D", "merge_dependabot", "Merge Dependabot"),
         Binding("question_mark", "help", "Help"),
         Binding("space", "toggle_expand", "Expand"),
         Binding("1", "switch_view_list", "List", show=False),
@@ -966,7 +1106,25 @@ class RepoOverviewApp(App[None]):
         """Toggle expand/collapse for selected repo (list view only)."""
         if self.view_mode == "list":
             repo_list = self.query_one("#repo-list", RepoListWidget)
+            if repo_list.get_selected_special_action() == "dependabot-merge":
+                await self.action_merge_dependabot()
+                return
             repo_list.toggle_expand()
+
+    async def action_merge_dependabot(self) -> None:
+        """Open the Dependabot bulk-merge modal."""
+        if not self.repos:
+            status_bar = self.query_one(StatusBar)
+            status_bar.update("No repos loaded yet")
+            return
+        await self.push_screen(DependabotMergeScreen(self.repos))
+
+    async def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Trigger the Dependabot merger when the action row is activated."""
+        option_id = event.option.id or ""
+        if option_id == "action:dependabot-merge":
+            event.stop()
+            await self.action_merge_dependabot()
 
     async def action_cursor_down(self) -> None:
         """Move cursor down in current widget."""
