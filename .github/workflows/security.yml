@@ -15,7 +15,10 @@ concurrency:
 jobs:
   security-scan:
     name: Security Analysis
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Skip on draft PRs and on Dependabot PRs — Bandit scans src/, not deps,
+    # so dep bumps produce no new findings. The weekly scheduled cron still
+    # runs a full scan on main.
+    if: github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     permissions:
       contents: read
