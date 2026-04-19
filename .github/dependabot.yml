@@ -26,25 +26,15 @@ updates:
       prefix-development: "chore"
       include: "scope"
 
-    # Group related dependencies together
+    # Bundle all minor+patch updates into a single weekly PR to cut CI load.
+    # Major updates still open as individual PRs (they're usually breaking).
     groups:
-      # Group all pytest-related packages
-      pytest:
+      all-minor-patch:
         patterns:
-          - "pytest*"
-
-      # Group development dependencies (minor and patch updates only)
-      development:
-        dependency-type: "development"
+          - "*"
         update-types:
           - "minor"
           - "patch"
-
-      # Group security-related packages
-      security:
-        patterns:
-          - "bandit*"
-          - "safety"
 
     # Ignore specific dependencies or versions
     # Uncomment and customize as needed:
