@@ -529,6 +529,7 @@ class DependabotMergeScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "close_modal", "Close"),
         Binding("q", "close_modal", "Close"),
+        Binding("y", "copy_log", "Copy"),
     ]
 
     DEFAULT_CSS = """
@@ -587,7 +588,7 @@ class DependabotMergeScreen(ModalScreen[None]):
             with VerticalScroll(id="dependabot-log-scroll"):
                 yield Static("", id="dependabot-log")
             yield Static(
-                "[dim]Running — press Esc/q to dismiss when done[/dim]",
+                "[dim]Running — y copy | Esc/q close[/dim]",
                 id="dependabot-footer",
             )
 
@@ -644,7 +645,7 @@ class DependabotMergeScreen(ModalScreen[None]):
         status.update(summary)
         self._append_log("")
         self._append_log(f"[bold]{summary}[/bold]")
-        self.query_one("#dependabot-footer", Static).update("[dim]Press Esc/q to close[/dim]")
+        self.query_one("#dependabot-footer", Static).update("[dim]y copy | Esc/q close[/dim]")
 
     def _format_failure(self, repo_name: str, fail: MergeResult) -> str:
         return (
@@ -659,6 +660,21 @@ class DependabotMergeScreen(ModalScreen[None]):
 
     def action_close_modal(self) -> None:
         self.dismiss()
+
+    def action_copy_log(self) -> None:
+        """Copy the log to the system clipboard via OSC 52."""
+        from rich.text import Text
+
+        plain_lines = [Text.from_markup(line).plain for line in self.log_lines]
+        plain_text = "\n".join(plain_lines).strip()
+        if not plain_text:
+            return
+        self.app.copy_to_clipboard(plain_text)
+        footer = self.query_one("#dependabot-footer", Static)
+        suffix = "Esc/q close" if self.finished else "Esc/q dismiss"
+        footer.update(
+            f"[green]✓ Copied {len(plain_lines)} lines to clipboard[/green] [dim]| {suffix}[/dim]"
+        )
 
 
 class StatusBar(Static):
