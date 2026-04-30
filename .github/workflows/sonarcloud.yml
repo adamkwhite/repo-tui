@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore', '.github/**']
   pull_request:
     branches:
       - main
+    paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore', '.github/**']
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
