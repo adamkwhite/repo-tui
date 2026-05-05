@@ -6,16 +6,20 @@ on:
     paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore', '.github/**']
   pull_request:
     branches: [main]
+    types: [opened, reopened, ready_for_review]
     paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore', '.github/**']
   workflow_dispatch:  # Allow manual triggers
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint:
-    name: Lint with Ruff
+    name: Pre-commit Checks (Ruff, mypy, formatting)
     runs-on: ubuntu-latest
 
     steps:
@@ -28,64 +32,19 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          # Install dev dependencies (includes ruff)
-          if [ -f requirements-dev.txt ]; then
-            pip install -r requirements-dev.txt
-          fi
+      - name: Install pre-commit
+        run: pip install pre-commit
 
-      - name: Run ruff check
-        run: |
-          # Only run if Python files exist
-          if find . -name "*.py" -type f | grep -q .; then
-            ruff check .
-          else
-            echo "No Python files found, skipping ruff check"
-          fi
-
-      - name: Check ruff formatting
-        run: |
-          # Only run if Python files exist
-          if find . -name "*.py" -type f | grep -q .; then
-            ruff format --check .
-          else
-            echo "No Python files found, skipping ruff format check"
-          fi
-
-  typecheck:
-    name: Type Check with mypy
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
         with:
-          python-version: '3.13'
-          cache: 'pip'
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-
 
-      - name: Install dependencies
-        run: |
-          # Install project dependencies
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
-          # Install dev dependencies
-          if [ -f requirements-dev.txt ]; then
-            pip install -r requirements-dev.txt
-          fi
-
-      - name: Run mypy
-        run: |
-          # Only run if Python files exist
-          if find src/ -name "*.py" -type f | grep -q .; then
-            mypy src/ --config-file=pyproject.toml
-          else
-            echo "No Python files found in src/, skipping mypy"
-          fi
+      - name: Run pre-commit checks
+        run: pre-commit run --all-files --show-diff-on-failure
 
   test:
     name: Test with pytest
@@ -137,8 +96,18 @@ jobs:
             echo "This is expected for a template repository"
           fi
 
+      # Hand coverage.xml to the downstream `sonarcloud` job so it does not
+      # re-run the entire pytest suite (saves ~6 min/PR).
+      - name: Upload coverage.xml for SonarCloud
+        if: hashFiles('coverage.xml') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 1
+
       - name: Upload coverage to artifacts
-        if: matrix.python-version == '3.13' && hashFiles('htmlcov/**') != ''
+        if: hashFiles('htmlcov/**') != ''
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
@@ -146,7 +115,7 @@ jobs:
           retention-days: 30
 
       - name: Upload test report to artifacts
-        if: matrix.python-version == '3.13' && hashFiles('test-report.html') != ''
+        if: hashFiles('test-report.html') != ''
         uses: actions/upload-artifact@v7
         with:
           name: test-report
@@ -154,10 +123,62 @@ jobs:
           retention-days: 30
 
       - name: Coverage summary
-        if: matrix.python-version == '3.13' && hashFiles('.coverage') != ''
+        if: hashFiles('.coverage') != ''
         run: |
           echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           coverage report >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage to Codecov
+        if: hashFiles('coverage.xml') != ''
+        uses: codecov/codecov-action@v5
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # Consumes coverage.xml from the `test` job above instead of re-running
+  # pytest. Skipped on draft PRs and Dependabot (no SONAR_TOKEN access).
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.actor != 'dependabot[bot]' && (github.event.pull_request.draft == false || github.event_name != 'pull_request')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage.xml from test job
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml
+          path: .
+        continue-on-error: true
+
+      - name: SonarCloud Scan
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
+            -Dsonar.organization=${{ github.repository_owner }}
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+
+      - name: SonarCloud Quality Gate check
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
