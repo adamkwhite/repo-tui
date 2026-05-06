@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import re
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Coroutine
@@ -22,6 +23,24 @@ ProgressCallback = Callable[[int, int, str], Coroutine[Any, Any, None]]
 
 CACHE_DIR = Path("~/.cache/repo-tui").expanduser()
 CACHE_FILE = CACHE_DIR / "repos.json"
+
+# Sentinel owner used for repos that exist locally but have no GitHub remote.
+LOCAL_ONLY_OWNER = "local"
+
+_GITHUB_ORIGIN_RE = re.compile(
+    r"^(?:git@github\.com:|https?://(?:[^@/]+@)?github\.com/)([^/]+)/(.+?)(?:\.git)?/?$"
+)
+
+
+def parse_github_origin(origin: str) -> tuple[str, str] | None:
+    """Parse a GitHub remote URL into (owner, repo) — preserves case.
+
+    Returns None for non-GitHub URLs.
+    """
+    match = _GITHUB_ORIGIN_RE.match(origin.strip())
+    if not match:
+        return None
+    return match.group(1), match.group(2)
 
 
 class NetworkError(Exception):
@@ -82,6 +101,90 @@ def _dict_to_repo(d: dict) -> RepoOverview:
         friendly_name=d.get("friendly_name"),
         pushed_at=d.get("pushed_at"),
     )
+
+
+async def _git_origin_url(repo_path: Path) -> str | None:
+    """Return the origin remote URL for a local git repo, or None if not set."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(repo_path),
+            "remote",
+            "get-url",
+            "origin",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        url = stdout.decode().strip()
+        return url or None
+    except Exception:
+        return None
+
+
+async def _git_last_commit_iso(repo_path: Path) -> str | None:
+    """Return the ISO 8601 commit date of HEAD, or None on error."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(repo_path),
+            "log",
+            "-1",
+            "--format=%cI",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        value = stdout.decode().strip()
+        return value or None
+    except Exception:
+        return None
+
+
+class LocalRepoScan(NamedTuple):
+    """Result of scanning the local code path for git repos."""
+
+    by_owner_repo: dict[tuple[str, str], Path]
+    local_only: list[Path]
+
+
+async def scan_local_repos(local_code_path: Path) -> LocalRepoScan:
+    """Scan the local code path for git repositories.
+
+    Returns:
+        LocalRepoScan with:
+        - by_owner_repo: maps (owner_lower, name_lower) -> local path for repos
+          whose origin points at a GitHub URL. Used to find local checkouts even
+          when the directory name differs from the GitHub repo name.
+        - local_only: paths for repos with no remote, or with a non-GitHub remote.
+    """
+    scan = LocalRepoScan(by_owner_repo={}, local_only=[])
+    if not local_code_path.exists() or not local_code_path.is_dir():
+        return scan
+
+    candidates = [
+        entry for entry in local_code_path.iterdir() if entry.is_dir() and (entry / ".git").exists()
+    ]
+    if not candidates:
+        return scan
+
+    origins = await asyncio.gather(*(_git_origin_url(p) for p in candidates))
+
+    for path, origin in zip(candidates, origins, strict=True):
+        parsed = parse_github_origin(origin) if origin else None
+        if parsed:
+            owner, name = parsed
+            scan.by_owner_repo[(owner.lower(), name.lower())] = path
+        else:
+            scan.local_only.append(path)
+
+    return scan
 
 
 def format_cache_age(timestamp: str | None) -> str:
@@ -458,6 +561,45 @@ class SonarCloudClient:
         return patterns
 
 
+async def _build_local_only_overviews(
+    config: Config,
+    paths: list[Path],
+) -> list[RepoOverview]:
+    """Build RepoOverview entries for local repos that have no GitHub remote."""
+    if not paths:
+        return []
+
+    github = GitHubClient(config)
+    overviews: list[RepoOverview] = []
+
+    async def build_one(path: Path) -> RepoOverview | None:
+        name = path.name
+        if not config.should_include_repo(name):
+            return None
+        has_uncommitted, current_branch = await github.get_git_status(path)
+        pushed_at = await _git_last_commit_iso(path)
+        return RepoOverview(
+            name=name,
+            owner=LOCAL_ONLY_OWNER,
+            url="",
+            open_issues_count=0,
+            issues=[],
+            sonar_status=None,
+            local_path=str(path),
+            sonar_checked=False,
+            pull_requests=[],
+            details_loaded=True,
+            has_uncommitted_changes=has_uncommitted,
+            current_branch=current_branch,
+            friendly_name=config.get_friendly_name(name),
+            pushed_at=pushed_at,
+        )
+
+    results = await asyncio.gather(*(build_one(p) for p in paths))
+    overviews.extend(r for r in results if r is not None)
+    return overviews
+
+
 async def fetch_all_repos(
     config: Config,
     check_sonar: bool = False,
@@ -507,6 +649,12 @@ async def fetch_all_repos(
 
     total = len(repos)
 
+    # Scan local code path once: lets us match a checkout to its remote even when
+    # the directory name differs from the GitHub repo name (e.g. local
+    # "kafka-food-pipeline" -> remote "KafkaFoodPipeline"), and surface dirs
+    # whose origin isn't on GitHub at all.
+    local_scan = await scan_local_repos(config.get_local_code_path())
+
     # Parallel fetch: create tasks for all repos
     async def fetch_repo_data(repo_data: dict[str, Any]) -> RepoOverview:
         repo_name = repo_data["name"]
@@ -522,7 +670,10 @@ async def fetch_all_repos(
 
         issues, pull_requests = await asyncio.gather(issues_task, prs_task)
 
-        local_path = github.get_local_repo_path(repo_name)
+        local_path = local_scan.by_owner_repo.get((owner.lower(), repo_name.lower()))
+        if local_path is None:
+            # Fall back to directory-name match for repos with no remote URL set.
+            local_path = github.get_local_repo_path(repo_name)
         primary_lang = repo_data.get("primaryLanguage")
         language = primary_lang.get("name") if primary_lang else None
         topics_data = repo_data.get("repositoryTopics", [])
@@ -590,6 +741,11 @@ async def fetch_all_repos(
         batch_results = await asyncio.gather(*[fetch_repo_data(r) for r in batch])
         overviews.extend(batch_results)
 
+    # Add local-only repos (dirs with no GitHub remote) so they show up alongside
+    # GitHub-backed repos. They have no issues/PRs/Sonar — just git status.
+    local_only_overviews = await _build_local_only_overviews(config, local_scan.local_only)
+    overviews.extend(local_only_overviews)
+
     # Sort by most recently pushed first
     overviews.sort(key=lambda r: r.pushed_at or "", reverse=True)
 
@@ -604,17 +760,46 @@ async def fetch_single_repo(
     owner: str,
     repo_name: str,
     check_sonar: bool = False,
+    local_path: Path | None = None,
 ) -> RepoOverview:
     """Fetch data for a single repository.
 
     Args:
         config: Configuration object
-        owner: Repository owner
+        owner: Repository owner (use LOCAL_ONLY_OWNER for local-only repos)
         repo_name: Repository name
         check_sonar: Whether to check SonarCloud status
+        local_path: Override for the local checkout path. Required when
+            owner == LOCAL_ONLY_OWNER (since the directory name may differ
+            from anything on GitHub).
     """
     github = GitHubClient(config)
     sonar = SonarCloudClient(config)
+
+    if owner == LOCAL_ONLY_OWNER:
+        path = local_path or github.get_local_repo_path(repo_name)
+        has_uncommitted = False
+        current_branch = None
+        pushed_at = None
+        if path:
+            has_uncommitted, current_branch = await github.get_git_status(path)
+            pushed_at = await _git_last_commit_iso(path)
+        return RepoOverview(
+            name=repo_name,
+            owner=LOCAL_ONLY_OWNER,
+            url="",
+            open_issues_count=0,
+            issues=[],
+            sonar_status=None,
+            local_path=str(path) if path else None,
+            sonar_checked=False,
+            pull_requests=[],
+            details_loaded=True,
+            has_uncommitted_changes=has_uncommitted,
+            current_branch=current_branch,
+            friendly_name=config.get_friendly_name(repo_name),
+            pushed_at=pushed_at,
+        )
 
     issues = await github.get_repo_issues(owner, repo_name)
     pull_requests = await github.get_repo_prs(owner, repo_name)
@@ -627,7 +812,8 @@ async def fetch_single_repo(
             if sonar_status:
                 break
 
-    local_path = github.get_local_repo_path(repo_name)
+    if local_path is None:
+        local_path = github.get_local_repo_path(repo_name)
 
     # Check git status if repo is local
     has_uncommitted = False
@@ -663,6 +849,14 @@ async def fetch_repo_details(
         repo: Repository to load details for
     """
     if repo.details_loaded:
+        return
+
+    if repo.owner == LOCAL_ONLY_OWNER:
+        # Local-only repos have no issues/PRs to fetch.
+        repo.issues = []
+        repo.pull_requests = []
+        repo.open_issues_count = 0
+        repo.details_loaded = True
         return
 
     github = GitHubClient(config)

@@ -6,6 +6,7 @@ import asyncio
 import atexit
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from textual import events
@@ -929,6 +930,7 @@ class RepoOverviewApp(App[None]):
                 selected_repo.owner,
                 selected_repo.name,
                 self.check_sonar,
+                local_path=Path(selected_repo.local_path) if selected_repo.local_path else None,
             )
 
             # Replace the repo in our list
@@ -986,6 +988,7 @@ class RepoOverviewApp(App[None]):
                 selected_repo.owner,
                 selected_repo.name,
                 check_sonar=True,
+                local_path=Path(selected_repo.local_path) if selected_repo.local_path else None,
             )
 
             # Replace the repo in our list
