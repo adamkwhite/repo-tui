@@ -10,8 +10,10 @@ from textual.message import Message
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
+from ..models import RepoOverview, redact_text
+
 if TYPE_CHECKING:
-    from ..models import Issue, PullRequest, RepoOverview
+    from ..models import Issue, PullRequest
 
 
 SPECIAL_ACTION_DEPENDABOT = "dependabot-merge"
@@ -174,7 +176,12 @@ class RepoListWidget(OptionList):
 
     def _build_issue_option(self, repo: RepoOverview, issue: Issue) -> Option:
         """Build a rich option for an issue (indented under repo)."""
-        text = Text.from_markup(f"    [dim]#{issue.number}[/dim] {issue.title}")
+        title = (
+            redact_text(issue.title)
+            if (RepoOverview.privacy_mode and repo.is_private)
+            else issue.title
+        )
+        text = Text.from_markup(f"    [dim]#{issue.number}[/dim] {title}")
         return Option(text, id=f"issue:{repo.name}:{issue.number}")
 
     def _build_pr_option(self, repo: RepoOverview, pr: PullRequest) -> Option:
@@ -212,14 +219,18 @@ class RepoListWidget(OptionList):
         # Prefer full name over username
         display_name = pr.author_name if pr.author_name else pr.author
         author = f"[dim]by {display_name}[/dim] " if display_name else ""
+        _private = RepoOverview.privacy_mode and repo.is_private
+        title = redact_text(pr.title) if _private else pr.title
         text = Text.from_markup(
-            f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{pr.title}"
+            f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{title}"
         )
         return Option(text, id=f"pr:{repo.name}:{pr.number}")
 
     def _build_description_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for the repo description."""
         desc = repo.description if repo.description else "No description"
+        if RepoOverview.privacy_mode and repo.is_private:
+            desc = redact_text(desc)
         text = Text.from_markup(f"    [white italic]{desc}[/white italic]")
         return Option(text, id=f"desc:{repo.name}", disabled=True)
 

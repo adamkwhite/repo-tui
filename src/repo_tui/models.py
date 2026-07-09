@@ -56,9 +56,25 @@ class SonarStatus:
 CLOUD_TOPICS = {"aws", "azure", "gcp", "cloudflare", "vercel", "heroku", "digitalocean"}
 
 
+def mask_name(name: str) -> str:
+    """Mask the middle of a name with asterisks, keeping first 2 and last 2 chars."""
+    if len(name) <= 4:
+        return "*" * len(name)
+    return name[:2] + "*" * (len(name) - 4) + name[-2:]
+
+
+def redact_text(text: str) -> str:
+    """Replace each word with asterisks of matching length, preserving whitespace and punctuation."""
+    import re
+
+    return re.sub(r"\w+", lambda m: "*" * len(m.group()), text)
+
+
 @dataclass
 class RepoOverview:
     """Repository overview with issues and SonarCloud status."""
+
+    privacy_mode = False
 
     name: str
     owner: str
@@ -66,17 +82,18 @@ class RepoOverview:
     open_issues_count: int
     issues: list[Issue]
     sonar_status: SonarStatus | None
+    is_private: bool = False
     local_path: str | None = None
-    sonar_checked: bool = False  # True if we attempted to check SonarCloud
-    language: str | None = None  # Primary programming language
-    topics: list[str] | None = None  # Repository topics/tags
-    pull_requests: list[PullRequest] | None = None  # Open pull requests
-    details_loaded: bool = False  # True if issues/PRs have been fetched
-    has_uncommitted_changes: bool = False  # True if local repo has uncommitted changes
-    current_branch: str | None = None  # Current git branch if local repo exists
-    description: str | None = None  # Repository description
-    friendly_name: str | None = None  # User-configured friendly display name
-    pushed_at: str | None = None  # Last push date (ISO 8601)
+    sonar_checked: bool = False
+    language: str | None = None
+    topics: list[str] | None = None
+    pull_requests: list[PullRequest] | None = None
+    details_loaded: bool = False
+    has_uncommitted_changes: bool = False
+    current_branch: str | None = None
+    description: str | None = None
+    friendly_name: str | None = None
+    pushed_at: str | None = None
 
     @property
     def pushed_at_relative(self) -> str | None:
@@ -106,11 +123,24 @@ class RepoOverview:
             return None
 
     @property
+    def safe_name(self) -> str:
+        """Repo name masked if private and privacy mode is on."""
+        if RepoOverview.privacy_mode and self.is_private:
+            return mask_name(self.name)
+        return self.name
+
+    @property
     def display_name(self) -> str:
         """Get the display name (friendly name if set, otherwise repo name)."""
+        name = self.safe_name
         if self.friendly_name:
-            return f"{self.friendly_name} [dim]({self.name})[/dim]"
-        return self.name
+            friendly = (
+                mask_name(self.friendly_name)
+                if (RepoOverview.privacy_mode and self.is_private)
+                else self.friendly_name
+            )
+            return f"{friendly} [dim]({name})[/dim]"
+        return name
 
     @property
     def critical_issue_count(self) -> int:

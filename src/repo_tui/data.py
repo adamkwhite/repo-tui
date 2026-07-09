@@ -89,6 +89,7 @@ def _dict_to_repo(d: dict) -> RepoOverview:
         open_issues_count=d["open_issues_count"],
         issues=issues,
         sonar_status=sonar,
+        is_private=d.get("is_private", False),
         local_path=d.get("local_path"),
         sonar_checked=d.get("sonar_checked", False),
         language=d.get("language"),
@@ -228,7 +229,7 @@ class GitHubClient:
             cmd.extend(
                 [
                     "--json",
-                    "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description,pushedAt",
+                    "name,owner,url,hasIssuesEnabled,primaryLanguage,repositoryTopics,description,pushedAt,isPrivate",
                     "--limit",
                     "1000",
                 ]
@@ -718,6 +719,7 @@ async def fetch_all_repos(
             open_issues_count=len(issues),
             issues=issues,
             sonar_status=sonar_status,
+            is_private=repo_data.get("isPrivate", False),
             local_path=str(local_path) if local_path else None,
             sonar_checked=sonar_checked,
             language=language,
@@ -761,6 +763,7 @@ async def fetch_single_repo(
     repo_name: str,
     check_sonar: bool = False,
     local_path: Path | None = None,
+    is_private: bool = False,
 ) -> RepoOverview:
     """Fetch data for a single repository.
 
@@ -791,6 +794,7 @@ async def fetch_single_repo(
             open_issues_count=0,
             issues=[],
             sonar_status=None,
+            is_private=is_private,
             local_path=str(path) if path else None,
             sonar_checked=False,
             pull_requests=[],
@@ -828,6 +832,7 @@ async def fetch_single_repo(
         open_issues_count=len(issues),
         issues=issues,
         sonar_status=sonar_status,
+        is_private=is_private,
         local_path=str(local_path) if local_path else None,
         sonar_checked=check_sonar,
         pull_requests=pull_requests,

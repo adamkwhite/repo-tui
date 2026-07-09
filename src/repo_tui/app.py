@@ -7,7 +7,7 @@ import atexit
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -20,12 +20,9 @@ from .config import Config
 from .data import fetch_all_repos, fetch_single_repo, format_cache_age
 from .dependabot import MergeResult, merge_all_dependabot_prs
 from .launcher import launch_claude
-from .models import Issue, PullRequest
+from .models import Issue, PullRequest, RepoOverview, redact_text
 from .widgets.repo_grid import RepoGridWidget
 from .widgets.repo_list import RepoListWidget
-
-if TYPE_CHECKING:
-    from .models import RepoOverview
 
 
 def _cleanup_terminal():
@@ -63,6 +60,7 @@ HELP_TEXT = """
   R             Refresh all repos
   s             Check SonarCloud for current repo
   S             Toggle SonarCloud for all repos
+  p             Toggle privacy mode (mask private repo names)
   D             Bulk-merge Dependabot PRs across all repos
   q             Quit
   ?             Show this help
@@ -205,12 +203,14 @@ class IssueDetailScreen(ModalScreen[int]):
         repo_name: str = "",
         issue_list: list[Issue] | None = None,
         current_index: int = 0,
+        is_private: bool = False,
     ) -> None:
         super().__init__()
         self.issue = issue
         self.repo_name = repo_name
         self.issue_list = issue_list or []
         self.current_index = current_index
+        self.is_private = is_private
 
     def compose(self) -> ComposeResult:
         with Vertical(id="issue-detail-container"):
@@ -280,6 +280,12 @@ class IssueDetailScreen(ModalScreen[int]):
             self.issue = self.issue_list[new_index]
             self._update_content()
 
+    def _redact(self, text: str) -> str:
+        """Redact text if this repo is private and privacy mode is on."""
+        if RepoOverview.privacy_mode and self.is_private:
+            return redact_text(text)
+        return text
+
     def _update_content(self) -> None:
         """Update all content for current issue."""
         issue = self.issue
@@ -287,7 +293,7 @@ class IssueDetailScreen(ModalScreen[int]):
         # Title
         title_text = (
             f"[bold]{self.repo_name}[/bold] "
-            f"[cyan]#{issue.number}[/cyan] {self._escape(issue.title)}"
+            f"[cyan]#{issue.number}[/cyan] {self._escape(self._redact(issue.title))}"
         )
         self.query_one("#issue-title", Static).update(title_text)
 
@@ -309,7 +315,7 @@ class IssueDetailScreen(ModalScreen[int]):
 
         # Body
         body = issue.body or "[dim]No description provided[/dim]"
-        self.query_one("#issue-body", Static).update(self._escape(body))
+        self.query_one("#issue-body", Static).update(self._escape(self._redact(body)))
 
         # Reset scroll position
         self.query_one("#issue-body-scroll", VerticalScroll).scroll_home()
@@ -390,10 +396,12 @@ class PRDetailScreen(ModalScreen[int]):
         repo_name: str = "",
         pr_list: list[PullRequest] | None = None,
         current_index: int = 0,
+        is_private: bool = False,
     ) -> None:
         super().__init__()
         self.pr = pr
         self.repo_name = repo_name
+        self.is_private = is_private
         self.pr_list = pr_list or []
         self.current_index = current_index
 
@@ -446,6 +454,12 @@ class PRDetailScreen(ModalScreen[int]):
             self.pr = self.pr_list[new_index]
             self._update_content()
 
+    def _redact(self, text: str) -> str:
+        """Redact text if this repo is private and privacy mode is on."""
+        if RepoOverview.privacy_mode and self.is_private:
+            return redact_text(text)
+        return text
+
     def _update_content(self) -> None:
         """Update all content for current PR."""
         pr = self.pr
@@ -454,7 +468,7 @@ class PRDetailScreen(ModalScreen[int]):
         draft_badge = "[yellow]DRAFT[/yellow] " if pr.draft else ""
         title_text = (
             f"[bold]{self.repo_name}[/bold] "
-            f"[green]PR #{pr.number}[/green] {draft_badge}{self._escape(pr.title)}"
+            f"[green]PR #{pr.number}[/green] {draft_badge}{self._escape(self._redact(pr.title))}"
         )
         self.query_one("#pr-title", Static).update(title_text)
 
@@ -477,7 +491,9 @@ class PRDetailScreen(ModalScreen[int]):
 
         # Branch info
         if pr.head_ref and pr.base_ref:
-            status_parts.append(f"[cyan]{pr.head_ref}[/cyan] → [cyan]{pr.base_ref}[/cyan]")
+            head = self._redact(pr.head_ref)
+            base = self._redact(pr.base_ref)
+            status_parts.append(f"[cyan]{head}[/cyan] → [cyan]{base}[/cyan]")
 
         # Review decision
         if pr.review_decision == "APPROVED":
@@ -517,7 +533,7 @@ class PRDetailScreen(ModalScreen[int]):
 
         # Body/description
         body_text = pr.body if pr.body else "[dim]No description provided[/dim]"
-        self.query_one("#pr-body", Static).update(body_text)
+        self.query_one("#pr-body", Static).update(self._redact(body_text))
 
     def _escape(self, text: str) -> str:
         """Escape Rich markup characters in text."""
@@ -751,6 +767,7 @@ class RepoOverviewApp(App[None]):
         Binding("c", "launch", "Claude"),
         Binding("s", "sonar_repo", "Sonar"),
         Binding("S", "sonar_all", "Sonar All"),
+        Binding("p", "toggle_privacy", "Privacy"),
         Binding("D", "merge_dependabot", "Merge Dependabot"),
         Binding("question_mark", "help", "Help"),
         Binding("space", "toggle_expand", "Expand"),
@@ -766,13 +783,14 @@ class RepoOverviewApp(App[None]):
         Binding("right", "cursor_right", "Right", show=False),
     ]
 
-    def __init__(self, check_sonar: bool = False) -> None:
+    def __init__(self, check_sonar: bool = False, privacy: bool = False) -> None:
         super().__init__()
         self.config = Config()
         self.repos: list[RepoOverview] = []
         self.check_sonar = check_sonar
         self.view_mode = "list"  # "list" or "grid"
         self.is_cached = False
+        RepoOverview.privacy_mode = privacy or self.config.data.get("privacy_mode", False)
 
     def compose(self) -> ComposeResult:
         """Create the UI layout."""
@@ -880,6 +898,15 @@ class RepoOverviewApp(App[None]):
             # Widget might not exist during transition
             return None
 
+    async def action_toggle_privacy(self) -> None:
+        """Toggle privacy mode (mask private repo names)."""
+        RepoOverview.privacy_mode = not RepoOverview.privacy_mode
+        current_widget = self._get_current_widget()
+        if current_widget:
+            current_widget.set_repos(self.repos)
+        status = "ON" if RepoOverview.privacy_mode else "OFF"
+        self.query_one(StatusBar).update(f"Privacy mode {status}")
+
     async def action_switch_view_list(self) -> None:
         """Switch to list view."""
         if self.view_mode != "list":
@@ -919,7 +946,7 @@ class RepoOverviewApp(App[None]):
             )
             return
 
-        loading_screen = LoadingScreen(f"Refreshing {selected_repo.name}...")
+        loading_screen = LoadingScreen(f"Refreshing {selected_repo.safe_name}...")
         self.push_screen(loading_screen)
 
         await asyncio.sleep(0.1)
@@ -931,6 +958,7 @@ class RepoOverviewApp(App[None]):
                 selected_repo.name,
                 self.check_sonar,
                 local_path=Path(selected_repo.local_path) if selected_repo.local_path else None,
+                is_private=selected_repo.is_private,
             )
 
             # Replace the repo in our list
@@ -948,7 +976,9 @@ class RepoOverviewApp(App[None]):
             total_issues = sum(r.open_issues_count for r in self.repos)
             sonar_indicator = " [SonarCloud ON]" if self.check_sonar else ""
             status_bar.update_stats(
-                len(self.repos), total_issues, f"Refreshed {selected_repo.name}{sonar_indicator}"
+                len(self.repos),
+                total_issues,
+                f"Refreshed {selected_repo.safe_name}{sonar_indicator}",
             )
         finally:
             self.pop_screen()
@@ -977,7 +1007,7 @@ class RepoOverviewApp(App[None]):
             )
             return
 
-        loading_screen = LoadingScreen(f"Checking Sonar for {selected_repo.name}...")
+        loading_screen = LoadingScreen(f"Checking Sonar for {selected_repo.safe_name}...")
         self.push_screen(loading_screen)
 
         await asyncio.sleep(0.1)
@@ -989,6 +1019,7 @@ class RepoOverviewApp(App[None]):
                 selected_repo.name,
                 check_sonar=True,
                 local_path=Path(selected_repo.local_path) if selected_repo.local_path else None,
+                is_private=selected_repo.is_private,
             )
 
             # Replace the repo in our list
@@ -1003,7 +1034,7 @@ class RepoOverviewApp(App[None]):
 
             total_issues = sum(r.open_issues_count for r in self.repos)
             status_bar.update_stats(
-                len(self.repos), total_issues, f"Sonar checked: {selected_repo.name}"
+                len(self.repos), total_issues, f"Sonar checked: {selected_repo.safe_name}"
             )
         finally:
             self.pop_screen()
@@ -1022,7 +1053,7 @@ class RepoOverviewApp(App[None]):
 
             total = len(self.repos)
             for i, repo in enumerate(self.repos):
-                loading_screen.update_message(f"Checking {i + 1}/{total}", repo.name)
+                loading_screen.update_message(f"Checking {i + 1}/{total}", repo.safe_name)
 
                 # Try to find sonar project
                 project_keys = sonar.guess_project_key(repo.owner, repo.name)
@@ -1059,7 +1090,7 @@ class RepoOverviewApp(App[None]):
             return
 
         if not selected_repo.local_path:
-            status_bar.update(f"Repo not found locally: ~/Code/{selected_repo.name}")
+            status_bar.update(f"Repo not found locally: ~/Code/{selected_repo.safe_name}")
             return
 
         # Check if an inline PR is selected
@@ -1076,7 +1107,7 @@ class RepoOverviewApp(App[None]):
         elif selected_issue:
             msg = f"Launching #{selected_issue.number}..."
         else:
-            msg = f"Launching {selected_repo.name}..."
+            msg = f"Launching {selected_repo.safe_name}..."
 
         loading_screen = LoadingScreen(msg)
         await self.push_screen(loading_screen)
@@ -1186,7 +1217,9 @@ class RepoOverviewApp(App[None]):
                 0,
             )
             await self.push_screen(
-                PRDetailScreen(pr, repo.name, pr_list, current_index),
+                PRDetailScreen(
+                    pr, repo.safe_name, pr_list, current_index, is_private=repo.is_private
+                ),
                 callback=self._on_pr_detail_dismiss,
             )
             return
@@ -1201,7 +1234,9 @@ class RepoOverviewApp(App[None]):
                 0,
             )
             await self.push_screen(
-                IssueDetailScreen(issue, repo.name, issue_list, current_index),
+                IssueDetailScreen(
+                    issue, repo.safe_name, issue_list, current_index, is_private=repo.is_private
+                ),
                 callback=self._on_issue_detail_dismiss,
             )
             return
@@ -1216,12 +1251,24 @@ class RepoOverviewApp(App[None]):
                 # Already expanded, show first PR or issue
                 if repo.pull_requests:
                     await self.push_screen(
-                        PRDetailScreen(repo.pull_requests[0], repo.name, repo.pull_requests, 0),
+                        PRDetailScreen(
+                            repo.pull_requests[0],
+                            repo.safe_name,
+                            repo.pull_requests,
+                            0,
+                            is_private=repo.is_private,
+                        ),
                         callback=self._on_pr_detail_dismiss,
                     )
                 elif repo.issues:
                     await self.push_screen(
-                        IssueDetailScreen(repo.issues[0], repo.name, repo.issues, 0),
+                        IssueDetailScreen(
+                            repo.issues[0],
+                            repo.safe_name,
+                            repo.issues,
+                            0,
+                            is_private=repo.is_private,
+                        ),
                         callback=self._on_issue_detail_dismiss,
                     )
 
@@ -1263,9 +1310,12 @@ def main() -> None:
     parser.add_argument(
         "-s", "--sonar", action="store_true", help="Check SonarCloud/SonarQube status on startup"
     )
+    parser.add_argument(
+        "-p", "--privacy", action="store_true", help="Enable privacy mode (mask private repo names)"
+    )
     args = parser.parse_args()
 
-    app = RepoOverviewApp(check_sonar=args.sonar)
+    app = RepoOverviewApp(check_sonar=args.sonar, privacy=args.privacy)
     app.run()
 
 
