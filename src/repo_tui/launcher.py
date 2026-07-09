@@ -88,7 +88,7 @@ def launch_claude(
     Returns a status message.
     """
     if not repo.local_path:
-        return f"Repo not found locally: ~/Code/{repo.name}"
+        return f"Repo not found locally: ~/Code/{repo.safe_name}"
 
     try:
         # Get claude command from config, default to "claude"
@@ -114,10 +114,10 @@ def launch_claude(
         )
 
         if pr:
-            return f"Launched Claude for {repo.name} PR #{pr.number}"
+            return f"Launched Claude for {repo.safe_name} PR #{pr.number}"
         if issue:
-            return f"Launched Claude for {repo.name} #{issue.number}"
-        return f"Launched Claude for {repo.name}"
+            return f"Launched Claude for {repo.safe_name} #{issue.number}"
+        return f"Launched Claude for {repo.safe_name}"
 
     except FileNotFoundError as e:
         error_msg = f"Error: File not found - {e.filename}"

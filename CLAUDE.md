@@ -62,6 +62,22 @@ The app supports two view modes (switch with `1` and `2` keys):
 
 Both views share the same data model and support all actions (refresh, open, launch Claude, etc.).
 
+## Privacy Mode
+
+Masks private repo names, descriptions, issue/PR titles, and PR bodies so demo videos don't reveal sensitive repo details. Public repos are never affected.
+
+**How to enable:**
+- `p` key at runtime (toggleable)
+- `--privacy` / `-p` CLI flag
+- `"privacy_mode": true` in config file
+
+**What gets masked:**
+- Repo names: first 2 and last 2 chars kept, middle replaced with `*` (e.g. `secret-repo` → `se*******po`)
+- Descriptions, issue titles, PR titles, PR bodies: each word replaced with `*` of matching length
+- Branch names in PR detail view
+
+**Architecture:** `RepoOverview.privacy_mode` is a class-level toggle. `safe_name` property returns the masked name. `display_name` uses `safe_name`. `redact_text()` handles body/title masking. `is_private` field is populated from GitHub's `isPrivate` API field.
+
 ## Development & Testing
 
 ### Running the App
