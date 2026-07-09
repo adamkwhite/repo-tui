@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 from typing import TYPE_CHECKING
 
+from rich.markup import escape
 from rich.text import Text
 from textual.message import Message
 from textual.widgets import OptionList
@@ -181,7 +182,7 @@ class RepoListWidget(OptionList):
             if (RepoOverview.privacy_mode and repo.is_private)
             else issue.title
         )
-        text = Text.from_markup(f"    [dim]#{issue.number}[/dim] {title}")
+        text = Text.from_markup(f"    [dim]#{issue.number}[/dim] {escape(title)}")
         return Option(text, id=f"issue:{repo.name}:{issue.number}")
 
     def _build_pr_option(self, repo: RepoOverview, pr: PullRequest) -> Option:
@@ -222,7 +223,7 @@ class RepoListWidget(OptionList):
         _private = RepoOverview.privacy_mode and repo.is_private
         title = redact_text(pr.title) if _private else pr.title
         text = Text.from_markup(
-            f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{title}"
+            f"    [green]PR #{pr.number}[/green] {draft}{date_str}{author}{escape(title)}"
         )
         return Option(text, id=f"pr:{repo.name}:{pr.number}")
 
@@ -231,7 +232,7 @@ class RepoListWidget(OptionList):
         desc = repo.description if repo.description else "No description"
         if RepoOverview.privacy_mode and repo.is_private:
             desc = redact_text(desc)
-        text = Text.from_markup(f"    [white italic]{desc}[/white italic]")
+        text = Text.from_markup(f"    [white italic]{escape(desc)}[/white italic]")
         return Option(text, id=f"desc:{repo.name}", disabled=True)
 
     def toggle_expand(self) -> None:
