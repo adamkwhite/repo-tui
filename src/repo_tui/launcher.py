@@ -29,7 +29,7 @@ def build_claude_prompt(issue: Issue | None = None, pr: PullRequest | None = Non
         return f"Work on PR #{pr.number}{draft_status}: {pr.title}"
     if issue:
         return f"Work on issue #{issue.number}: {issue.title}"
-    return "/StartOfTheDay"
+    return "/StartSession"
 
 
 def build_wt_command(
