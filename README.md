@@ -13,6 +13,7 @@ Terminal UI for GitHub repository overview with SonarCloud integration.
 - **Issue Details** - Press `e` to view full issue details in a modal
 - **Claude Code Integration** - Press `c` to launch Claude Code in a new Windows Terminal tab
 - **Quick Links** - Press `o` to open repo/issue in browser
+- **Privacy Mode** - Press `p` (or pass `--privacy`) to mask private repo names, descriptions, and issue/PR titles for screen-shares and demos (public repos are never masked)
 
 ## Requirements
 
@@ -66,6 +67,7 @@ python -m repo_tui.app
 | `c` | Launch Claude Code |
 | `r` | Refresh data |
 | `s` | Toggle SonarCloud check |
+| `p` | Toggle privacy mode (mask private repo details) |
 | `?` | Help |
 | `q` | Quit |
 
@@ -96,6 +98,9 @@ sonar_token_pass: null  # Pass path (e.g., work/sonarqube) - recommended
 
 # Claude Code launcher
 claude_command: claude  # Claude CLI command or full path
+
+# Privacy mode (mask private repo details on startup; toggle at runtime with `p`)
+privacy_mode: false
 
 # Debug settings
 debug: false  # Enable debug logging (/tmp/sonar-*.log, /tmp/claude-launch-debug.log)
