@@ -150,6 +150,15 @@ jobs:
     permissions:
       contents: read
 
+    # Job level, not step level. The `if: env.SONAR_TOKEN != ''` guards below
+    # are evaluated against the workflow/job env context — a step's own `env:`
+    # block is not visible to that step's own `if:`. With the token defined
+    # only on the steps, the guards read an empty string, both steps skipped
+    # every run, and the job still reported success because a job whose steps
+    # all skipped is a passing job.
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -163,12 +172,18 @@ jobs:
           path: .
         continue-on-error: true
 
+      # Without this, "SonarCloud Analysis: success" on a run where nothing was
+      # analyzed is indistinguishable from a real passing quality gate.
+      - name: Warn when Sonar is not configured
+        if: ${{ env.SONAR_TOKEN == '' }}
+        run: |
+          echo "::warning title=SonarCloud skipped::SONAR_TOKEN is not set, so no analysis ran and no quality gate was evaluated. This job's green check does NOT mean the gate passed."
+
       - name: SonarCloud Scan
         if: ${{ env.SONAR_TOKEN != '' }}
         uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
@@ -179,6 +194,4 @@ jobs:
         if: ${{ env.SONAR_TOKEN != '' }}
         uses: sonarsource/sonarqube-quality-gate-action@master
         timeout-minutes: 5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         continue-on-error: true
