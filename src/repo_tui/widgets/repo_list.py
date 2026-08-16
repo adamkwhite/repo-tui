@@ -95,8 +95,12 @@ class RepoListWidget(OptionList):
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""
+        # Priority 0: gh failed, so issue/PR counts are unknown, not zero. Must
+        # outrank the green "clean" branch below, which empty lists would hit.
+        if repo.fetch_failed:
+            icon = "[magenta]◌[/magenta]"
         # Priority 1: Sonar status (actual code quality issues)
-        if repo.sonar_status and repo.sonar_status.status == "ERROR":
+        elif repo.sonar_status and repo.sonar_status.status == "ERROR":
             icon = "[red]●[/red]"
         elif repo.critical_issue_count >= 5:
             # Priority 2: High number of critical issues (bugs, security, etc.)
@@ -129,6 +133,8 @@ class RepoListWidget(OptionList):
             issue_label = "issue" if issue_count == 1 else "issues"
             counts_parts.append(f"{issue_count} {issue_label}")
         counts_badge = f" [dim]{', '.join(counts_parts)}[/dim]" if counts_parts else ""
+        if repo.fetch_failed:
+            counts_badge = " [magenta]fetch failed[/magenta]"
 
         # Local/remote indicator with branch info
         local = ""

@@ -1,0 +1,8 @@
+# ast-grep project config. Rules match AST shapes that ruff and grep cannot
+# express -- e.g. "a return statement anywhere inside an except handler",
+# which needs a relational operator (`inside`), not a text pattern.
+#
+# Run by the "Structural lint" pre-commit hook over the whole tree. The tree is
+# at zero violations, so no baseline file is needed.
+ruleDirs:
+  - .ast-grep/rules

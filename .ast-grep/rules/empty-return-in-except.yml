@@ -1,0 +1,22 @@
+id: empty-return-in-except
+language: python
+severity: error
+note: >-
+  Raise NetworkError (see GitHubClient.get_repo_issues / get_repo_prs in
+  src/repo_tui/data.py) or return None, and let the caller mark the repo as
+  unread. An empty list here renders as a green "clean" status dot.
+message: >-
+  Empty collection returned from an except handler: a failed operation becomes
+  indistinguishable from a legitimately empty result.
+rule:
+  any:
+    - pattern: return []
+    - pattern: return {}
+    - pattern: return set()
+    - pattern: return list()
+    - pattern: return dict()
+    - pattern: return tuple()
+    - pattern: return frozenset()
+  inside:
+    kind: except_clause
+    stopBy: end
