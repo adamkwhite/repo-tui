@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .data import summarize_checks
+
 if TYPE_CHECKING:
     from .models import RepoOverview
 
@@ -34,27 +36,6 @@ class RepoProgress:
 
 def _is_dependabot_author(author: str | None) -> bool:
     return "dependabot" in (author or "").lower()
-
-
-def _summarize_checks(rollup: Any) -> str | None:
-    """Collapse a statusCheckRollup blob into SUCCESS/FAILURE/PENDING."""
-    contexts: list[Any] = []
-    if isinstance(rollup, dict):
-        contexts = rollup.get("contexts", []) or []
-    elif isinstance(rollup, list):
-        contexts = rollup
-    if not contexts:
-        return None
-
-    statuses = [c.get("state") or c.get("conclusion") for c in contexts if isinstance(c, dict)]
-    if any(s in ("FAILURE", "failure", "TIMED_OUT") for s in statuses):
-        return "FAILURE"
-    if any(s in ("PENDING", "pending", "IN_PROGRESS") for s in statuses):
-        return "PENDING"
-    non_empty = [s for s in statuses if s]
-    if non_empty and all(s in ("SUCCESS", "success") for s in non_empty):
-        return "SUCCESS"
-    return None
 
 
 async def _list_dependabot_prs(owner: str, repo: str) -> list[dict[str, Any]] | None:
@@ -166,24 +147,33 @@ async def merge_all_dependabot_prs(
         results: list[MergeResult] = []
         for pr in prs:
             pr_number = pr.get("number")
-            pr_title = pr.get("title", "")
             if not isinstance(pr_number, int):
                 continue
+            pr_title = pr.get("title", "")
 
-            mergeable = pr.get("mergeable")
-            checks = _summarize_checks(pr.get("statusCheckRollup"))
-
-            if mergeable == "CONFLICTING":
-                results.append(MergeResult(pr_number, pr_title, False, "has merge conflicts"))
-                continue
-            if checks == "FAILURE":
-                results.append(MergeResult(pr_number, pr_title, False, "CI checks failing"))
-                continue
-            if checks == "PENDING":
-                results.append(MergeResult(pr_number, pr_title, False, "CI checks still pending"))
+            blocked = _preflight_reason(pr)
+            if blocked:
+                results.append(MergeResult(pr_number, pr_title, False, blocked))
                 continue
 
             success, reason = await _merge_pr(repo.owner, repo.name, pr_number)
             results.append(MergeResult(pr_number, pr_title, success, reason))
 
         yield RepoProgress(repo.name, "done", results)
+
+
+def _preflight_reason(pr: dict[str, Any]) -> str | None:
+    """Why this PR must not be merged, or None if it is clear to try.
+
+    Checked before calling gh so a doomed merge is reported as a specific
+    reason rather than whatever gh happens to print when it refuses.
+    """
+    if pr.get("mergeable") == "CONFLICTING":
+        return "has merge conflicts"
+
+    checks = summarize_checks(pr.get("statusCheckRollup"))
+    if checks == "FAILURE":
+        return "CI checks failing"
+    if checks == "PENDING":
+        return "CI checks still pending"
+    return None

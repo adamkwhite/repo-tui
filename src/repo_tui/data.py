@@ -212,6 +212,106 @@ def format_cache_age(timestamp: str | None) -> str:
         return "unknown age"
 
 
+def summarize_checks(rollup: Any) -> str | None:
+    """Collapse a gh `statusCheckRollup` blob into SUCCESS / FAILURE / PENDING.
+
+    gh returns either a dict with "contexts" or a bare list of contexts
+    depending on the query, and individual contexts report their result as
+    either "state" (status checks) or "conclusion" (check runs).
+    """
+    contexts: list[Any] = []
+    if isinstance(rollup, dict):
+        contexts = rollup.get("contexts", []) or []
+    elif isinstance(rollup, list):
+        contexts = rollup
+    if not contexts:
+        return None
+
+    statuses = [c.get("state") or c.get("conclusion") for c in contexts if isinstance(c, dict)]
+    if any(s in ("FAILURE", "failure", "TIMED_OUT") for s in statuses):
+        return "FAILURE"
+    if any(s in ("PENDING", "pending", "IN_PROGRESS") for s in statuses):
+        return "PENDING"
+    non_empty = [s for s in statuses if s]
+    if non_empty and all(s in ("SUCCESS", "success") for s in non_empty):
+        return "SUCCESS"
+    return None
+
+
+def _parse_pr(pr: dict[str, Any]) -> PullRequest:
+    """Build a PullRequest from one entry of `gh pr list --json`."""
+    reviewers = [r.get("login") for r in pr.get("reviewRequests", []) if r.get("login")]
+    author = pr.get("author", {})
+    return PullRequest(
+        number=pr["number"],
+        title=pr["title"],
+        url=pr["url"],
+        author=author.get("login", "unknown"),
+        state=pr["state"],
+        draft=pr.get("isDraft", False),
+        labels=[label["name"] for label in pr.get("labels", [])],
+        body=pr.get("body", ""),
+        reviewers=reviewers or None,
+        review_decision=pr.get("reviewDecision"),
+        head_ref=pr.get("headRefName"),
+        base_ref=pr.get("baseRefName"),
+        created_at=pr.get("createdAt"),
+        updated_at=pr.get("updatedAt"),
+        mergeable=pr.get("mergeable"),
+        checks_status=summarize_checks(pr.get("statusCheckRollup")),
+        author_name=author.get("name"),  # Full name, may be absent
+    )
+
+
+def _parse_issue(issue: dict[str, Any]) -> Issue:
+    """Build an Issue from one entry of `gh issue list --json`."""
+    assignees = issue.get("assignees")
+    return Issue(
+        number=issue["number"],
+        title=issue["title"],
+        url=issue["url"],
+        labels=[label["name"] for label in issue.get("labels", [])],
+        state=issue["state"],
+        body=issue.get("body", "") or "",
+        assignee=assignees[0].get("login") if assignees else None,
+    )
+
+
+class SonarCheck(NamedTuple):
+    """Outcome of looking a repo up in Sonar."""
+
+    status: SonarStatus | None
+    checked: bool
+    unreachable: bool
+
+
+async def check_sonar_status(
+    config: Config, sonar: SonarCloudClient, owner: str, repo_name: str
+) -> SonarCheck:
+    """Try each candidate project key until one answers.
+
+    Stops at the first NetworkError: if the instance is unreachable, the
+    remaining key spellings just repeat the same timeout.
+    """
+    project_keys = sonar.guess_project_key(owner, repo_name)
+    config.debug_log(
+        "sonar-check",
+        f"\n=== Checking sonar for {repo_name} ===\nProject keys to try: {project_keys}\n",
+    )
+
+    for project_key in project_keys:
+        try:
+            status = await sonar.get_project_status(project_key)
+        except NetworkError:
+            return SonarCheck(None, checked=True, unreachable=True)
+        config.debug_log("sonar-check", f"Tried {project_key}: {status}\n")
+        if status:
+            return SonarCheck(status, checked=True, unreachable=False)
+
+    config.debug_log("sonar-check", f"Final: checked=True, status=None ({repo_name})\n")
+    return SonarCheck(None, checked=True, unreachable=False)
+
+
 class GitHubClient:
     """GitHub API client using gh CLI."""
 
@@ -286,23 +386,7 @@ class GitHubClient:
                 )
 
             issues_data = json.loads(stdout.decode())
-            return [
-                Issue(
-                    number=issue["number"],
-                    title=issue["title"],
-                    url=issue["url"],
-                    labels=[label["name"] for label in issue.get("labels", [])],
-                    state=issue["state"],
-                    body=issue.get("body", "") or "",
-                    assignee=(
-                        issue.get("assignees", [{}])[0].get("login")
-                        if issue.get("assignees")
-                        else None
-                    ),
-                )
-                for issue in issues_data
-                if issue["state"] == "OPEN"
-            ]
+            return [_parse_issue(issue) for issue in issues_data if issue["state"] == "OPEN"]
         except NetworkError:
             raise
         except Exception as e:
@@ -339,64 +423,7 @@ class GitHubClient:
             prs_data = json.loads(stdout.decode())
             self._debug(f"Parsed {len(prs_data)} PRs from JSON\n")
 
-            result = []
-
-            for pr in prs_data:
-                # Extract reviewers
-                reviewers = [r.get("login") for r in pr.get("reviewRequests", []) if r.get("login")]
-
-                # Extract checks status
-                checks_rollup = pr.get("statusCheckRollup")
-                checks_status = None
-                if checks_rollup:
-                    # statusCheckRollup can be either a dict with "contexts" or a list of contexts
-                    if isinstance(checks_rollup, dict):
-                        contexts = checks_rollup.get("contexts", [])
-                    elif isinstance(checks_rollup, list):
-                        contexts = checks_rollup
-                    else:
-                        contexts = []
-
-                    if contexts:
-                        # Determine overall status
-                        statuses = [
-                            c.get("state") or c.get("conclusion")
-                            for c in contexts
-                            if isinstance(c, dict)
-                        ]
-                        if any(s in ["FAILURE", "failure", "TIMED_OUT"] for s in statuses):
-                            checks_status = "FAILURE"
-                        elif any(s in ["PENDING", "pending", "IN_PROGRESS"] for s in statuses):
-                            checks_status = "PENDING"
-                        elif all(s in ["SUCCESS", "success"] for s in statuses if s):
-                            checks_status = "SUCCESS"
-
-                # Extract author info
-                author_obj = pr.get("author", {})
-                author_login = author_obj.get("login", "unknown")
-                author_name = author_obj.get("name")  # Full name (may be None)
-
-                result.append(
-                    PullRequest(
-                        number=pr["number"],
-                        title=pr["title"],
-                        url=pr["url"],
-                        author=author_login,
-                        state=pr["state"],
-                        draft=pr.get("isDraft", False),
-                        labels=[label["name"] for label in pr.get("labels", [])],
-                        body=pr.get("body", ""),
-                        reviewers=reviewers if reviewers else None,
-                        review_decision=pr.get("reviewDecision"),
-                        head_ref=pr.get("headRefName"),
-                        base_ref=pr.get("baseRefName"),
-                        created_at=pr.get("createdAt"),
-                        updated_at=pr.get("updatedAt"),
-                        mergeable=pr.get("mergeable"),
-                        checks_status=checks_status,
-                        author_name=author_name,
-                    )
-                )
+            result = [_parse_pr(pr) for pr in prs_data]
 
             self._debug(f"Returning {len(result)} PRs\n")
 
@@ -618,6 +645,56 @@ async def _build_local_only_overviews(
     return overviews
 
 
+async def _fetch_issues_and_prs(
+    github: GitHubClient, owner: str, repo_name: str, has_issues: bool = True
+) -> tuple[list[Issue], list[PullRequest], bool]:
+    """Fetch a repo's issues and PRs together. Returns (issues, prs, failed).
+
+    A gh failure must not abort the whole sweep — one unreachable repo should
+    not blank the other 149 — so failure is reported as a flag, and the caller
+    marks the repo unknown rather than rendering empty lists as "clean".
+
+    return_exceptions=True because with the default, the first failure
+    propagates while the sibling task keeps running unawaited, and the
+    resulting "exception was never retrieved" noise on stderr corrupts the TUI.
+    """
+    issues_task = (
+        github.get_repo_issues(owner, repo_name) if has_issues else asyncio.sleep(0, result=[])
+    )
+    prs_task = github.get_repo_prs(owner, repo_name)
+
+    issues_result, prs_result = await asyncio.gather(issues_task, prs_task, return_exceptions=True)
+
+    failed = isinstance(issues_result, BaseException) or isinstance(prs_result, BaseException)
+    issues = [] if isinstance(issues_result, BaseException) else issues_result
+    prs = [] if isinstance(prs_result, BaseException) else prs_result
+    return issues, prs, failed
+
+
+async def _cached_result(config: Config, github: GitHubClient) -> FetchResult:
+    """Serve the last good sweep when GitHub is unreachable.
+
+    Git status is re-read for every local checkout: that works offline and is
+    the part most likely to have changed since the cache was written.
+    """
+    cached = load_cache()
+    if not cached:
+        return FetchResult(repos=[], is_cached=True, cache_timestamp=None)
+
+    cached_repos, timestamp = cached
+    cached_repos = [r for r in cached_repos if config.should_include_repo(r.name)]
+    cached_repos.sort(key=lambda r: r.pushed_at or "", reverse=True)
+
+    for repo in cached_repos:
+        local_path = Path(repo.local_path) if repo.local_path else None
+        if local_path and local_path.exists():
+            repo.has_uncommitted_changes, repo.current_branch = await github.get_git_status(
+                local_path
+            )
+
+    return FetchResult(repos=cached_repos, is_cached=True, cache_timestamp=timestamp)
+
+
 async def fetch_all_repos(
     config: Config,
     check_sonar: bool = False,
@@ -641,22 +718,7 @@ async def fetch_all_repos(
     try:
         repos = await github.get_user_repos()
     except NetworkError:
-        # Network down - fall back to cache
-        cached = load_cache()
-        if cached:
-            cached_repos, timestamp = cached
-            cached_repos = [r for r in cached_repos if config.should_include_repo(r.name)]
-            cached_repos.sort(key=lambda r: r.pushed_at or "", reverse=True)
-            # Refresh git status for local repos (works offline)
-            for repo in cached_repos:
-                if repo.local_path:
-                    local_path = Path(repo.local_path)
-                    if local_path.exists():
-                        has_changes, branch = await github.get_git_status(local_path)
-                        repo.has_uncommitted_changes = has_changes
-                        repo.current_branch = branch
-            return FetchResult(repos=cached_repos, is_cached=True, cache_timestamp=timestamp)
-        return FetchResult(repos=[], is_cached=True, cache_timestamp=None)
+        return await _cached_result(config, github)
 
     overviews: list[RepoOverview] = []
 
@@ -678,28 +740,9 @@ async def fetch_all_repos(
         repo_name = repo_data["name"]
         owner = repo_data["owner"]["login"]
 
-        # Fetch issues and PRs in parallel for this repo
-        issues_task = (
-            github.get_repo_issues(owner, repo_name)
-            if repo_data.get("hasIssuesEnabled", True)
-            else asyncio.sleep(0, result=[])
+        issues, pull_requests, fetch_failed = await _fetch_issues_and_prs(
+            github, owner, repo_name, has_issues=repo_data.get("hasIssuesEnabled", True)
         )
-        prs_task = github.get_repo_prs(owner, repo_name)
-
-        # A gh failure here must not abort the whole sweep — one unreachable repo
-        # shouldn't blank the other 149. Mark it instead, so the status dot can
-        # say "unknown" rather than the green "clean" that empty lists imply.
-        # return_exceptions=True: with the default, the first failure propagates
-        # while the sibling task keeps running unawaited ("exception was never
-        # retrieved" noise on stderr, which corrupts the TUI).
-        issues_result, prs_result = await asyncio.gather(
-            issues_task, prs_task, return_exceptions=True
-        )
-        fetch_failed = isinstance(issues_result, BaseException) or isinstance(
-            prs_result, BaseException
-        )
-        issues = [] if isinstance(issues_result, BaseException) else issues_result
-        pull_requests = [] if isinstance(prs_result, BaseException) else prs_result
 
         local_path = local_scan.by_owner_repo.get((owner.lower(), repo_name.lower()))
         if local_path is None:
@@ -718,33 +761,11 @@ async def fetch_all_repos(
         if local_path:
             has_uncommitted, current_branch = await github.get_git_status(local_path)
 
-        # Check SonarCloud status if enabled
-        sonar_status = None
-        sonar_checked = False
-        sonar_unreachable = False
-        if check_sonar:
-            project_keys = sonar.guess_project_key(owner, repo_name)
-            config.debug_log(
-                "sonar-check",
-                f"\n=== Checking sonar for {repo_name} ===\nProject keys to try: {project_keys}\n",
-            )
-
-            for project_key in project_keys:
-                try:
-                    sonar_status = await sonar.get_project_status(project_key)
-                except NetworkError:
-                    # The instance is unreachable, so trying the remaining key
-                    # spellings just repeats the same timeout.
-                    sonar_unreachable = True
-                    break
-                config.debug_log("sonar-check", f"Tried {project_key}: {sonar_status}\n")
-                if sonar_status:
-                    break
-            sonar_checked = True
-
-            config.debug_log(
-                "sonar-check", f"Final: checked={sonar_checked}, status={sonar_status}\n"
-            )
+        sonar_result = (
+            await check_sonar_status(config, sonar, owner, repo_name)
+            if check_sonar
+            else SonarCheck(None, checked=False, unreachable=False)
+        )
 
         return RepoOverview(
             name=repo_name,
@@ -752,10 +773,10 @@ async def fetch_all_repos(
             url=repo_data["url"],
             open_issues_count=len(issues),
             issues=issues,
-            sonar_status=sonar_status,
+            sonar_status=sonar_result.status,
             is_private=repo_data.get("isPrivate", False),
             local_path=str(local_path) if local_path else None,
-            sonar_checked=sonar_checked,
+            sonar_checked=sonar_result.checked,
             language=language,
             topics=topics,
             pull_requests=pull_requests,
@@ -766,7 +787,7 @@ async def fetch_all_repos(
             friendly_name=config.get_friendly_name(repo_name),
             pushed_at=pushed_at,
             fetch_failed=fetch_failed,
-            sonar_unreachable=sonar_unreachable,
+            sonar_unreachable=sonar_result.unreachable,
         )
 
     # Process in batches to avoid overwhelming the API
@@ -816,57 +837,21 @@ async def fetch_single_repo(
     sonar = SonarCloudClient(config)
 
     if owner == LOCAL_ONLY_OWNER:
-        path = local_path or github.get_local_repo_path(repo_name)
-        has_uncommitted: bool | None = False
-        current_branch = None
-        pushed_at = None
-        if path:
-            has_uncommitted, current_branch = await github.get_git_status(path)
-            pushed_at = await _git_last_commit_iso(path)
-        return RepoOverview(
-            name=repo_name,
-            owner=LOCAL_ONLY_OWNER,
-            url="",
-            open_issues_count=0,
-            issues=[],
-            sonar_status=None,
-            is_private=is_private,
-            local_path=str(path) if path else None,
-            sonar_checked=False,
-            pull_requests=[],
-            details_loaded=True,
-            has_uncommitted_changes=has_uncommitted,
-            current_branch=current_branch,
-            friendly_name=config.get_friendly_name(repo_name),
-            pushed_at=pushed_at,
-        )
+        return await _local_only_overview(config, github, repo_name, local_path, is_private)
 
-    fetch_failed = False
-    try:
-        issues = await github.get_repo_issues(owner, repo_name)
-        pull_requests = await github.get_repo_prs(owner, repo_name)
-    except NetworkError:
-        fetch_failed = True
-        issues, pull_requests = [], []
+    issues, pull_requests, fetch_failed = await _fetch_issues_and_prs(github, owner, repo_name)
 
-    sonar_status = None
-    sonar_unreachable = False
-    if check_sonar:
-        project_keys = sonar.guess_project_key(owner, repo_name)
-        for project_key in project_keys:
-            try:
-                sonar_status = await sonar.get_project_status(project_key)
-            except NetworkError:
-                sonar_unreachable = True
-                break
-            if sonar_status:
-                break
+    sonar_result = (
+        await check_sonar_status(config, sonar, owner, repo_name)
+        if check_sonar
+        else SonarCheck(None, checked=False, unreachable=False)
+    )
 
     if local_path is None:
         local_path = github.get_local_repo_path(repo_name)
 
     # Check git status if repo is local
-    has_uncommitted = False
+    has_uncommitted: bool | None = False
     current_branch = None
     if local_path:
         has_uncommitted, current_branch = await github.get_git_status(local_path)
@@ -877,7 +862,7 @@ async def fetch_single_repo(
         url=f"https://github.com/{owner}/{repo_name}",
         open_issues_count=len(issues),
         issues=issues,
-        sonar_status=sonar_status,
+        sonar_status=sonar_result.status,
         is_private=is_private,
         local_path=str(local_path) if local_path else None,
         sonar_checked=check_sonar,
@@ -887,7 +872,42 @@ async def fetch_single_repo(
         current_branch=current_branch,
         friendly_name=config.get_friendly_name(repo_name),
         fetch_failed=fetch_failed,
-        sonar_unreachable=sonar_unreachable,
+        sonar_unreachable=sonar_result.unreachable,
+    )
+
+
+async def _local_only_overview(
+    config: Config,
+    github: GitHubClient,
+    repo_name: str,
+    local_path: Path | None,
+    is_private: bool,
+) -> RepoOverview:
+    """Overview for a checkout with no GitHub remote: git status and nothing else."""
+    path = local_path or github.get_local_repo_path(repo_name)
+    has_uncommitted: bool | None = False
+    current_branch = None
+    pushed_at = None
+    if path:
+        has_uncommitted, current_branch = await github.get_git_status(path)
+        pushed_at = await _git_last_commit_iso(path)
+
+    return RepoOverview(
+        name=repo_name,
+        owner=LOCAL_ONLY_OWNER,
+        url="",
+        open_issues_count=0,
+        issues=[],
+        sonar_status=None,
+        is_private=is_private,
+        local_path=str(path) if path else None,
+        sonar_checked=False,
+        pull_requests=[],
+        details_loaded=True,
+        has_uncommitted_changes=has_uncommitted,
+        current_branch=current_branch,
+        friendly_name=config.get_friendly_name(repo_name),
+        pushed_at=pushed_at,
     )
 
 

@@ -6,6 +6,8 @@ import asyncio
 import atexit
 import subprocess
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,7 @@ from textual.widgets import Footer, Header, LoadingIndicator, OptionList, Static
 
 from .config import Config
 from .data import fetch_all_repos, fetch_single_repo, format_cache_age
-from .dependabot import MergeResult, merge_all_dependabot_prs
+from .dependabot import MergeResult, RepoProgress, merge_all_dependabot_prs
 from .launcher import launch_claude
 from .models import Issue, PullRequest, RepoOverview, redact_text
 from .widgets.repo_grid import RepoGridWidget
@@ -40,6 +42,107 @@ def _cleanup_terminal():
 
 # Register cleanup to run when Python exits
 atexit.register(_cleanup_terminal)
+
+
+# Review state, CI, and mergeability rendered as one block. Pure and
+# module-level so the mapping from PR fields to badges is testable without
+# mounting the modal; `redact` is injected because privacy mode masks branch
+# names but not the fixed labels around them.
+def pr_status_lines(pr: PullRequest, redact: Callable[[str], str] = lambda t: t) -> list[str]:
+    """Status badges for the PR detail modal, in display order."""
+    lines = []
+
+    if pr.head_ref and pr.base_ref:
+        lines.append(f"[cyan]{redact(pr.head_ref)}[/cyan] → [cyan]{redact(pr.base_ref)}[/cyan]")
+
+    review = {
+        "APPROVED": "[green]✓ Approved[/green]",
+        "CHANGES_REQUESTED": "[yellow]⚠ Changes requested[/yellow]",
+        "REVIEW_REQUIRED": "[dim]Review required[/dim]",
+    }.get(pr.review_decision or "")
+    if review:
+        lines.append(review)
+
+    if pr.reviewers:
+        lines.append(f"[dim]Reviewers: {', '.join(pr.reviewers)}[/dim]")
+
+    checks = {
+        "SUCCESS": "[green]✓ Checks passing[/green]",
+        "FAILURE": "[red]✗ Checks failing[/red]",
+        "PENDING": "[yellow]⋯ Checks pending[/yellow]",
+    }.get(pr.checks_status or "")
+    if checks:
+        lines.append(checks)
+
+    mergeable = {
+        "MERGEABLE": "[green]✓ Ready to merge[/green]",
+        "CONFLICTING": "[red]✗ Has conflicts[/red]",
+    }.get(pr.mergeable or "")
+    if mergeable:
+        lines.append(mergeable)
+
+    return lines
+
+
+@dataclass
+class MergeTally:
+    """Running totals for a Dependabot sweep, and the summary line they produce."""
+
+    repos_with_prs: int = 0
+    merged: int = 0
+    failed: int = 0
+    unreadable: int = 0
+
+    def summary(self, total_repos: int) -> str:
+        line = (
+            f"Done — scanned {total_repos} repos, "
+            f"{self.repos_with_prs} had Dependabot PRs, "
+            f"{self.merged} merged, {self.failed} failed"
+        )
+        # Only mentioned when non-zero: "0 unreadable" on every clean sweep is
+        # noise, but a silent skip would read as "nothing to merge".
+        if self.unreadable:
+            line += f", {self.unreadable} unreadable"
+        return line
+
+
+def format_merge_failure(repo_name: str, fail: MergeResult) -> str:
+    return f"[red]✗[/red] {repo_name} PR #{fail.pr_number} unable to merge because of {fail.reason}"
+
+
+def repo_result_lines(progress: RepoProgress, tally: MergeTally) -> list[str]:
+    """Log lines for one finished repo, updating the running tally.
+
+    Kept out of the modal so the counting rules — an unreadable repo is not a
+    clean one, a partial success is not "all merged" — are testable without
+    driving the UI.
+    """
+    if progress.error:
+        tally.unreadable += 1
+        return [f"[magenta]◌[/magenta] {progress.repo_name} {progress.error}"]
+
+    if not progress.results:
+        return [f"[dim]- {progress.repo_name} no open Dependabot PRs[/dim]"]
+
+    tally.repos_with_prs += 1
+    successes = [r for r in progress.results if r.success]
+    failures = [r for r in progress.results if not r.success]
+
+    lines = [format_merge_failure(progress.repo_name, fail) for fail in failures]
+    tally.failed += len(failures)
+
+    if successes:
+        pr_nums = ", ".join(f"#{r.pr_number}" for r in successes)
+        # "All ... Merged" only when nothing in the repo was left behind.
+        headline = (
+            f"All Dependabot PRs Merged ({pr_nums})"
+            if not failures
+            else f"merged {len(successes)} Dependabot PR(s) ({pr_nums})"
+        )
+        lines.append(f"[green]✓[/green] {progress.repo_name} {headline}")
+        tally.merged += len(successes)
+
+    return lines
 
 
 HELP_TEXT = """
@@ -486,43 +589,8 @@ class PRDetailScreen(ModalScreen[int]):
             meta_parts.append(f"({self.current_index + 1}/{len(self.pr_list)})")
         self.query_one("#pr-meta", Static).update(" | ".join(meta_parts))
 
-        # Status section - branches, review, checks, merge status
-        status_parts = []
-
-        # Branch info
-        if pr.head_ref and pr.base_ref:
-            head = self._redact(pr.head_ref)
-            base = self._redact(pr.base_ref)
-            status_parts.append(f"[cyan]{head}[/cyan] → [cyan]{base}[/cyan]")
-
-        # Review decision
-        if pr.review_decision == "APPROVED":
-            status_parts.append("[green]✓ Approved[/green]")
-        elif pr.review_decision == "CHANGES_REQUESTED":
-            status_parts.append("[yellow]⚠ Changes requested[/yellow]")
-        elif pr.review_decision == "REVIEW_REQUIRED":
-            status_parts.append("[dim]Review required[/dim]")
-
-        # Reviewers
-        if pr.reviewers:
-            reviewers_str = ", ".join(pr.reviewers)
-            status_parts.append(f"[dim]Reviewers: {reviewers_str}[/dim]")
-
-        # CI/CD checks
-        if pr.checks_status == "SUCCESS":
-            status_parts.append("[green]✓ Checks passing[/green]")
-        elif pr.checks_status == "FAILURE":
-            status_parts.append("[red]✗ Checks failing[/red]")
-        elif pr.checks_status == "PENDING":
-            status_parts.append("[yellow]⋯ Checks pending[/yellow]")
-
-        # Merge status
-        if pr.mergeable == "MERGEABLE":
-            status_parts.append("[green]✓ Ready to merge[/green]")
-        elif pr.mergeable == "CONFLICTING":
-            status_parts.append("[red]✗ Has conflicts[/red]")
-
-        self.query_one("#pr-status", Static).update("\n".join(status_parts) if status_parts else "")
+        status_lines = pr_status_lines(pr, redact=self._redact)
+        self.query_one("#pr-status", Static).update("\n".join(status_lines))
 
         # Labels
         if pr.labels:
@@ -616,66 +684,22 @@ class DependabotMergeScreen(ModalScreen[None]):
         status = self.query_one("#dependabot-status", Static)
         total_repos = len(self.target_repos)
         scanned = 0
-        repos_with_prs = 0
-        merged = 0
-        failed = 0
-        unreadable = 0
+        tally = MergeTally()
 
         async for progress in merge_all_dependabot_prs(self.target_repos):
             if progress.phase == "scanning":
                 scanned += 1
                 status.update(f"Scanning {scanned}/{total_repos}: {progress.repo_name}")
-                continue
-
-            if progress.phase == "done":
-                if progress.error:
-                    self._append_log(f"[magenta]◌[/magenta] {progress.repo_name} {progress.error}")
-                    unreadable += 1
-                    continue
-                if not progress.results:
-                    self._append_log(f"[dim]- {progress.repo_name} no open Dependabot PRs[/dim]")
-                    continue
-                repos_with_prs += 1
-                successes = [r for r in progress.results if r.success]
-                failures = [r for r in progress.results if not r.success]
-
-                for fail in failures:
-                    self._append_log(self._format_failure(progress.repo_name, fail))
-                    failed += 1
-
-                if successes and not failures:
-                    pr_nums = ", ".join(f"#{r.pr_number}" for r in successes)
-                    self._append_log(
-                        f"[green]✓[/green] {progress.repo_name} "
-                        f"All Dependabot PRs Merged ({pr_nums})"
-                    )
-                    merged += len(successes)
-                elif successes:
-                    pr_nums = ", ".join(f"#{r.pr_number}" for r in successes)
-                    self._append_log(
-                        f"[green]✓[/green] {progress.repo_name} "
-                        f"merged {len(successes)} Dependabot PR(s) ({pr_nums})"
-                    )
-                    merged += len(successes)
+            elif progress.phase == "done":
+                for line in repo_result_lines(progress, tally):
+                    self._append_log(line)
 
         self.finished = True
-        summary = (
-            f"Done — scanned {total_repos} repos, "
-            f"{repos_with_prs} had Dependabot PRs, "
-            f"{merged} merged, {failed} failed"
-        )
-        if unreadable:
-            summary += f", {unreadable} unreadable"
+        summary = tally.summary(total_repos)
         status.update(summary)
         self._append_log("")
         self._append_log(f"[bold]{summary}[/bold]")
         self.query_one("#dependabot-footer", Static).update("[dim]y copy | Esc/q close[/dim]")
-
-    def _format_failure(self, repo_name: str, fail: MergeResult) -> str:
-        return (
-            f"[red]✗[/red] {repo_name} "
-            f"PR #{fail.pr_number} unable to merge because of {fail.reason}"
-        )
 
     def _append_log(self, line: str) -> None:
         self.log_lines.append(line)
