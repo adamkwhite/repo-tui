@@ -220,10 +220,7 @@ class GitHubClient:
 
     def _debug(self, message: str) -> None:
         """Append to the PR fetch debug log, but only when debug is enabled."""
-        if not self.config.data.get("debug", False):
-            return
-        with open("/tmp/pr-fetch-debug.log", "a") as f:
-            f.write(message)
+        self.config.debug_log("pr-fetch", message)
 
     async def get_user_repos(self) -> list[dict[str, Any]]:
         """Get all repositories for the authenticated user or organization."""
@@ -545,29 +542,21 @@ class SonarCloudClient:
                 credentials = base64.b64encode(f"{self.token}:".encode()).decode()
                 request.add_header("Authorization", f"Basic {credentials}")
 
-            # Debug logging (if enabled)
-            if self.config.data.get("debug", False):
-                with open("/tmp/sonar-fetch-debug.log", "a") as f:
-                    f.write(f"\nFetching: {url}\n")
-                    f.write(f"Has token: {bool(self.token)}\n")
+            self.config.debug_log(
+                "sonar-fetch", f"\nFetching: {url}\nHas token: {bool(self.token)}\n"
+            )
 
             with urllib.request.urlopen(request, timeout=10) as response:
                 data: dict[str, Any] = json.loads(response.read().decode())
-                if self.config.data.get("debug", False):
-                    with open("/tmp/sonar-fetch-debug.log", "a") as f:
-                        f.write(f"Success: {data}\n")
+                self.config.debug_log("sonar-fetch", f"Success: {data}\n")
                 return data
         except urllib.error.HTTPError as e:
-            if self.config.data.get("debug", False):
-                with open("/tmp/sonar-fetch-debug.log", "a") as f:
-                    f.write(f"HTTP {e.code}: {e}\n")
+            self.config.debug_log("sonar-fetch", f"HTTP {e.code}: {e}\n")
             if e.code == 404:
                 return None
             raise NetworkError(f"sonar request failed (HTTP {e.code})") from e
         except Exception as e:
-            if self.config.data.get("debug", False):
-                with open("/tmp/sonar-fetch-debug.log", "a") as f:
-                    f.write(f"Error: {e}\n")
+            self.config.debug_log("sonar-fetch", f"Error: {e}\n")
             raise NetworkError(f"sonar request failed: {e}") from e
 
     def guess_project_key(self, owner: str, repo: str) -> list[str]:
@@ -735,11 +724,10 @@ async def fetch_all_repos(
         sonar_unreachable = False
         if check_sonar:
             project_keys = sonar.guess_project_key(owner, repo_name)
-            # Debug logging (if enabled)
-            if config.data.get("debug", False):
-                with open("/tmp/sonar-check-debug.log", "a") as f:
-                    f.write(f"\n=== Checking sonar for {repo_name} ===\n")
-                    f.write(f"Project keys to try: {project_keys}\n")
+            config.debug_log(
+                "sonar-check",
+                f"\n=== Checking sonar for {repo_name} ===\nProject keys to try: {project_keys}\n",
+            )
 
             for project_key in project_keys:
                 try:
@@ -749,16 +737,14 @@ async def fetch_all_repos(
                     # spellings just repeats the same timeout.
                     sonar_unreachable = True
                     break
-                if config.data.get("debug", False):
-                    with open("/tmp/sonar-check-debug.log", "a") as f:
-                        f.write(f"Tried {project_key}: {sonar_status}\n")
+                config.debug_log("sonar-check", f"Tried {project_key}: {sonar_status}\n")
                 if sonar_status:
                     break
             sonar_checked = True
 
-            if config.data.get("debug", False):
-                with open("/tmp/sonar-check-debug.log", "a") as f:
-                    f.write(f"Final: checked={sonar_checked}, status={sonar_status}\n")
+            config.debug_log(
+                "sonar-check", f"Final: checked={sonar_checked}, status={sonar_status}\n"
+            )
 
         return RepoOverview(
             name=repo_name,

@@ -132,12 +132,12 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Ratchet floor, not a target. Set to the measured total at the time it was
-# added so coverage can only go up; raise it when it does. The real bar is the
-# new-code gate in CI (diff-cover, 80% of changed lines) — this only stops
-# silent backsliding, since a total can hold steady while new code goes
-# untested. Local `./test.sh` and CI enforce the same number from here.
-fail_under = 56
+# Ratchet floor, not a target. Set from the number CI measures — the local run
+# reads ~1pp higher, so a floor taken from it fails in CI. Raise it as coverage
+# climbs. The real bar is the new-code gate in CI (diff-cover, 80% of changed
+# lines); this only stops silent backsliding, since a total can hold steady
+# while new code goes untested.
+fail_under = 58
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
