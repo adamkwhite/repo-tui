@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from repo_tui.data import summarize_checks
 from repo_tui.dependabot import (
     _is_dependabot_author,
     _shorten_reason,
-    _summarize_checks,
     merge_all_dependabot_prs,
 )
 from repo_tui.models import PullRequest, RepoOverview
@@ -48,17 +48,17 @@ def test_is_dependabot_author_variants():
 
 def test_summarize_checks_handles_dict_and_list():
     passing_dict = {"contexts": [{"conclusion": "SUCCESS"}, {"state": "success"}]}
-    assert _summarize_checks(passing_dict) == "SUCCESS"
+    assert summarize_checks(passing_dict) == "SUCCESS"
 
     failing_list = [{"state": "FAILURE"}, {"state": "SUCCESS"}]
-    assert _summarize_checks(failing_list) == "FAILURE"
+    assert summarize_checks(failing_list) == "FAILURE"
 
     pending = [{"state": "PENDING"}, {"state": "SUCCESS"}]
-    assert _summarize_checks(pending) == "PENDING"
+    assert summarize_checks(pending) == "PENDING"
 
-    assert _summarize_checks({}) is None
-    assert _summarize_checks([]) is None
-    assert _summarize_checks(None) is None
+    assert summarize_checks({}) is None
+    assert summarize_checks([]) is None
+    assert summarize_checks(None) is None
 
 
 def test_shorten_reason_known_patterns():
