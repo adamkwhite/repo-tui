@@ -269,27 +269,41 @@ This pattern is especially important in:
 - View switching operations
 - Any operation that calls `_get_current_widget()`
 
+## Failure States (read before touching data.py)
+
+The status dot must never claim a repo is healthy when we simply failed to read
+it. Three flags carry "unknown" through to the widgets:
+
+- `RepoOverview.fetch_failed` — `gh issue list` / `gh pr list` raised
+  `NetworkError`. Renders `◌ fetch failed`, never the green dot.
+- `RepoOverview.has_uncommitted_changes is None` — `git status` could not run.
+  Renders `git status unknown`. `False` means genuinely clean; the two are not
+  interchangeable.
+- `RepoOverview.sonar_unreachable` — the Sonar request failed. Only a 404 means
+  "no project"; everything else raises `NetworkError`.
+
+A `.ast-grep/rules/empty-return-in-except.yml` rule (run by pre-commit) blocks
+the pattern that caused this: returning an empty collection from an except
+handler. Fix the failure contract instead of silencing the rule.
+
 ## Current Status
 
-**Branch:** main (all PRs merged as of 2025-11-29)
-
-**Recent Changes:**
-- Fixed CI/CD pipeline by adding `requirements-dev.txt` with all dev dependencies
-- Added null safety check in Sonar All display update to prevent crashes
-- Applied ruff formatting across all Python files
-- All linting, type checking, and test checks now pass in CI
+**Branch:** main
 
 **Technology Stack:**
-- Python 3.13+ (specified in pyproject.toml)
+- Python 3.13+ (`requires-python` in pyproject.toml; CI tests 3.13 only)
 - Textual 0.40.0+ - Terminal UI framework
 - Rich 13.0.0+ - Terminal formatting
 - PyYAML 6.0+ - YAML config support
 - pytest-asyncio - Async test support (critical for Textual tests)
+- ast-grep - structural lint, rules in `.ast-grep/rules/`
+
+**Features not covered above:** grid view (`1`/`2`), privacy mode (`p`),
+Dependabot bulk merge (`D`, `src/repo_tui/dependabot.py`).
 
 **Known Issues:**
-- None currently - all CI checks passing
+- `launcher.py` is thinly tested (the `wt.exe` path needs subprocess mocking)
 
 **Next Steps:**
 - Monitor SonarCloud integration for any edge cases
-- Consider adding more comprehensive test coverage for widget operations
 - Potential future enhancement: Support both SonarCloud.io and self-hosted SonarQube simultaneously

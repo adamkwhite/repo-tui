@@ -21,7 +21,7 @@ Critical issue labels: `bug`, `security`, `breaking-change`, `ci-failure`, `prio
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.13+ (the version CI tests against)
 - `gh` CLI (authenticated)
 - Windows Terminal (for Claude Code launcher)
 - WSL/Ubuntu environment
