@@ -96,6 +96,8 @@ repos:
         name: Scan for committed secrets (gitleaks)
 
 default_language_version:
+  # Interpreter the hooks run under. Independent of the app's own
+  # requires-python (3.13); any 3.12+ interpreter can host them.
   python: python3.12
 
 # Skip hooks for specific commits
