@@ -29,6 +29,7 @@ class RepoProgress:
     repo_name: str
     phase: str  # "scanning" | "done"
     results: list[MergeResult] = field(default_factory=list)
+    error: str | None = None  # Set when the repo could not be read at all
 
 
 def _is_dependabot_author(author: str | None) -> bool:
@@ -56,8 +57,13 @@ def _summarize_checks(rollup: Any) -> str | None:
     return None
 
 
-async def _list_dependabot_prs(owner: str, repo: str) -> list[dict[str, Any]]:
-    """Live-query open Dependabot PRs for a repo."""
+async def _list_dependabot_prs(owner: str, repo: str) -> list[dict[str, Any]] | None:
+    """Live-query open Dependabot PRs for a repo.
+
+    Returns None when the listing itself failed — an empty list means "no open
+    Dependabot PRs", and reporting that for a failed `gh` call would tell the
+    user a repo is up to date when it may not be.
+    """
     proc = await asyncio.create_subprocess_exec(
         "gh",
         "pr",
@@ -77,12 +83,12 @@ async def _list_dependabot_prs(owner: str, repo: str) -> list[dict[str, Any]]:
     )
     stdout, _ = await proc.communicate()
     if proc.returncode != 0:
-        return []
+        return None
     try:
         data = json.loads(stdout.decode())
     except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+        return None
+    return data if isinstance(data, list) else None
 
 
 def _shorten_reason(stderr_text: str, exit_code: int) -> str:
@@ -150,6 +156,9 @@ async def merge_all_dependabot_prs(
             continue
 
         prs = await _list_dependabot_prs(repo.owner, repo.name)
+        if prs is None:
+            yield RepoProgress(repo.name, "done", [], error="could not list PRs (gh failed)")
+            continue
         if not prs:
             yield RepoProgress(repo.name, "done", [])
             continue

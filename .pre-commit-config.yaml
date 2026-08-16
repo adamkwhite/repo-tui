@@ -72,6 +72,21 @@ repos:
 
 # Configuration options
 
+  # Structural lint: AST shapes ruff and grep cannot express, e.g. "a return of
+  # an empty collection anywhere inside an except handler" (needs the `inside`
+  # relational operator). Rules live in .ast-grep/rules/.
+  # Whole-tree scan, not new-code-only: the tree is at zero violations, so
+  # there is no backlog to grandfather.
+  - repo: local
+    hooks:
+      - id: ast-grep
+        name: Structural lint (ast-grep)
+        entry: ast-grep scan
+        language: python
+        additional_dependencies: [ast-grep-cli>=0.40.0]
+        types: [python]
+        pass_filenames: false
+
   # Secret scanning — block commits containing API keys, tokens, private keys.
   # Added by add-gitleaks-hook.sh after the 2026-05-10 secret-sprawl audit.
   - repo: https://github.com/gitleaks/gitleaks

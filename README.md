@@ -158,6 +158,7 @@ Or use JSON format (`~/.repo-overview.json`):
 - **`debug`**: Enable debug logging for troubleshooting
   - Set to `true` to enable detailed logging:
     - SonarQube API calls: `/tmp/sonar-check-debug.log` and `/tmp/sonar-fetch-debug.log`
+    - PR fetching: `/tmp/pr-fetch-debug.log`
     - Claude launcher: `/tmp/claude-launch-debug.log`
   - Useful for troubleshooting integration issues
   - Default: `false`

@@ -237,3 +237,6 @@ docs/_templates/
 # ✅ docs/ (documentation)
 # ✅ README.md (project documentation)
 # ✅ .gitignore (this file!)
+
+# Agent scratch notes (not part of the project)
+.agent-notes/

@@ -94,6 +94,10 @@ class RepoOverview:
     description: str | None = None
     friendly_name: str | None = None
     pushed_at: str | None = None
+    # True when the gh calls for issues/PRs failed. Without this, a failed fetch
+    # is indistinguishable from a repo that genuinely has no issues and no PRs,
+    # and the status dot renders green ("clean") for a repo we know nothing about.
+    fetch_failed: bool = False
 
     @property
     def pushed_at_relative(self) -> str | None:

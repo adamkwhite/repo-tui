@@ -101,6 +101,7 @@ def _dict_to_repo(d: dict) -> RepoOverview:
         description=d.get("description"),
         friendly_name=d.get("friendly_name"),
         pushed_at=d.get("pushed_at"),
+        fetch_failed=d.get("fetch_failed", False),
     )
 
 
@@ -215,6 +216,13 @@ class GitHubClient:
     def __init__(self, config: Config) -> None:
         self.config = config
 
+    def _debug(self, message: str) -> None:
+        """Append to the PR fetch debug log, but only when debug is enabled."""
+        if not self.config.data.get("debug", False):
+            return
+        with open("/tmp/pr-fetch-debug.log", "a") as f:
+            f.write(message)
+
     async def get_user_repos(self) -> list[dict[str, Any]]:
         """Get all repositories for the authenticated user or organization."""
         try:
@@ -270,10 +278,13 @@ class GitHubClient:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await proc.communicate()
+            stdout, stderr = await proc.communicate()
 
             if proc.returncode != 0:
-                return []
+                raise NetworkError(
+                    f"gh issue list failed for {owner}/{repo} "
+                    f"(exit {proc.returncode}): {stderr.decode().strip()}"
+                )
 
             issues_data = json.loads(stdout.decode())
             return [
@@ -293,14 +304,14 @@ class GitHubClient:
                 for issue in issues_data
                 if issue["state"] == "OPEN"
             ]
-        except Exception:
-            return []
+        except NetworkError:
+            raise
+        except Exception as e:
+            raise NetworkError(f"could not read issues for {owner}/{repo}: {e}") from e
 
     async def get_repo_prs(self, owner: str, repo: str) -> list[PullRequest]:
         """Get open pull requests for a repository."""
-        # Debug: log that we're fetching
-        with open("/tmp/pr-fetch-debug.log", "a") as f:
-            f.write(f"\n=== Fetching PRs for {owner}/{repo} ===\n")
+        self._debug(f"\n=== Fetching PRs for {owner}/{repo} ===\n")
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -316,20 +327,18 @@ class GitHubClient:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await proc.communicate()
+            stdout, stderr = await proc.communicate()
 
-            with open("/tmp/pr-fetch-debug.log", "a") as f:
-                f.write(f"Return code: {proc.returncode}\n")
-                f.write(f"Stdout length: {len(stdout)}\n")
+            self._debug(f"Return code: {proc.returncode}\nStdout length: {len(stdout)}\n")
 
             if proc.returncode != 0:
-                with open("/tmp/pr-fetch-debug.log", "a") as f:
-                    f.write("Non-zero return code, returning empty\n")
-                return []
+                raise NetworkError(
+                    f"gh pr list failed for {owner}/{repo} "
+                    f"(exit {proc.returncode}): {stderr.decode().strip()}"
+                )
 
             prs_data = json.loads(stdout.decode())
-            with open("/tmp/pr-fetch-debug.log", "a") as f:
-                f.write(f"Parsed {len(prs_data)} PRs from JSON\n")
+            self._debug(f"Parsed {len(prs_data)} PRs from JSON\n")
 
             result = []
 
@@ -390,20 +399,19 @@ class GitHubClient:
                     )
                 )
 
-            with open("/tmp/pr-fetch-debug.log", "a") as f:
-                f.write(f"Returning {len(result)} PRs\n")
+            self._debug(f"Returning {len(result)} PRs\n")
 
             return result
+        except NetworkError:
+            raise
         except Exception as e:
-            # Debug: log the error to file
-            with open("/tmp/pr-fetch-errors.log", "a") as f:
-                import traceback
+            import traceback
 
-                f.write(f"\n=== ERROR fetching PRs for {owner}/{repo} ===\n")
-                f.write(f"Error: {e}\n")
-                f.write(traceback.format_exc())
-                f.write("\n")
-            return []
+            self._debug(
+                f"\n=== ERROR fetching PRs for {owner}/{repo} ===\n"
+                f"Error: {e}\n{traceback.format_exc()}\n"
+            )
+            raise NetworkError(f"could not read PRs for {owner}/{repo}: {e}") from e
 
     def get_local_repo_path(self, repo_name: str) -> Path | None:
         """Check if repo exists locally and return path."""
@@ -669,7 +677,20 @@ async def fetch_all_repos(
         )
         prs_task = github.get_repo_prs(owner, repo_name)
 
-        issues, pull_requests = await asyncio.gather(issues_task, prs_task)
+        # A gh failure here must not abort the whole sweep — one unreachable repo
+        # shouldn't blank the other 149. Mark it instead, so the status dot can
+        # say "unknown" rather than the green "clean" that empty lists imply.
+        # return_exceptions=True: with the default, the first failure propagates
+        # while the sibling task keeps running unawaited ("exception was never
+        # retrieved" noise on stderr, which corrupts the TUI).
+        issues_result, prs_result = await asyncio.gather(
+            issues_task, prs_task, return_exceptions=True
+        )
+        fetch_failed = isinstance(issues_result, BaseException) or isinstance(
+            prs_result, BaseException
+        )
+        issues = [] if isinstance(issues_result, BaseException) else issues_result
+        pull_requests = [] if isinstance(prs_result, BaseException) else prs_result
 
         local_path = local_scan.by_owner_repo.get((owner.lower(), repo_name.lower()))
         if local_path is None:
@@ -731,6 +752,7 @@ async def fetch_all_repos(
             description=description,
             friendly_name=config.get_friendly_name(repo_name),
             pushed_at=pushed_at,
+            fetch_failed=fetch_failed,
         )
 
     # Process in batches to avoid overwhelming the API
@@ -805,8 +827,13 @@ async def fetch_single_repo(
             pushed_at=pushed_at,
         )
 
-    issues = await github.get_repo_issues(owner, repo_name)
-    pull_requests = await github.get_repo_prs(owner, repo_name)
+    fetch_failed = False
+    try:
+        issues = await github.get_repo_issues(owner, repo_name)
+        pull_requests = await github.get_repo_prs(owner, repo_name)
+    except NetworkError:
+        fetch_failed = True
+        issues, pull_requests = [], []
 
     sonar_status = None
     if check_sonar:
@@ -840,6 +867,7 @@ async def fetch_single_repo(
         has_uncommitted_changes=has_uncommitted,
         current_branch=current_branch,
         friendly_name=config.get_friendly_name(repo_name),
+        fetch_failed=fetch_failed,
     )
 
 
@@ -866,10 +894,16 @@ async def fetch_repo_details(
 
     github = GitHubClient(config)
 
-    issues = await github.get_repo_issues(repo.owner, repo.name)
-    pull_requests = await github.get_repo_prs(repo.owner, repo.name)
+    try:
+        issues = await github.get_repo_issues(repo.owner, repo.name)
+        pull_requests = await github.get_repo_prs(repo.owner, repo.name)
+    except NetworkError:
+        # Leave details_loaded False so expanding again retries the fetch.
+        repo.fetch_failed = True
+        return
 
     repo.issues = issues
     repo.open_issues_count = len(issues)
     repo.pull_requests = pull_requests
     repo.details_loaded = True
+    repo.fetch_failed = False

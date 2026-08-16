@@ -619,6 +619,7 @@ class DependabotMergeScreen(ModalScreen[None]):
         repos_with_prs = 0
         merged = 0
         failed = 0
+        unreadable = 0
 
         async for progress in merge_all_dependabot_prs(self.target_repos):
             if progress.phase == "scanning":
@@ -627,6 +628,10 @@ class DependabotMergeScreen(ModalScreen[None]):
                 continue
 
             if progress.phase == "done":
+                if progress.error:
+                    self._append_log(f"[magenta]◌[/magenta] {progress.repo_name} {progress.error}")
+                    unreadable += 1
+                    continue
                 if not progress.results:
                     self._append_log(f"[dim]- {progress.repo_name} no open Dependabot PRs[/dim]")
                     continue
@@ -659,6 +664,8 @@ class DependabotMergeScreen(ModalScreen[None]):
             f"{repos_with_prs} had Dependabot PRs, "
             f"{merged} merged, {failed} failed"
         )
+        if unreadable:
+            summary += f", {unreadable} unreadable"
         status.update(summary)
         self._append_log("")
         self._append_log(f"[bold]{summary}[/bold]")

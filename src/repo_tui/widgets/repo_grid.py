@@ -38,6 +38,9 @@ class RepoCard(Static):
             pr_label = "PR" if pr_count == 1 else "PRs"
             counts_parts.append(f"[green]{pr_count}[/green] {pr_label}")
         counts = ", ".join(counts_parts) if counts_parts else "[dim]No issues or PRs[/dim]"
+        if repo.fetch_failed:
+            # Not "No issues or PRs" — gh failed, so the counts are unknown.
+            counts = "[magenta]◌ fetch failed[/magenta]"
 
         # Git status
         if repo.local_path:
@@ -72,7 +75,9 @@ class RepoCard(Static):
         # Activity indicator (basic heuristic)
         activity = ""
         total_items = issue_count + pr_count
-        if total_items >= 5:
+        if repo.fetch_failed:
+            activity = ""  # No green "all clear" for a repo we failed to read.
+        elif total_items >= 5:
             activity = "🔥"
         elif total_items >= 2:
             activity = "🟡"
