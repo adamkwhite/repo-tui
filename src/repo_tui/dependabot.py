@@ -144,22 +144,27 @@ async def merge_all_dependabot_prs(
             yield RepoProgress(repo.name, "done", [])
             continue
 
-        results: list[MergeResult] = []
-        for pr in prs:
-            pr_number = pr.get("number")
-            if not isinstance(pr_number, int):
-                continue
-            pr_title = pr.get("title", "")
+        yield RepoProgress(repo.name, "done", await _merge_listed_prs(repo, prs))
 
-            blocked = _preflight_reason(pr)
-            if blocked:
-                results.append(MergeResult(pr_number, pr_title, False, blocked))
-                continue
 
-            success, reason = await _merge_pr(repo.owner, repo.name, pr_number)
-            results.append(MergeResult(pr_number, pr_title, success, reason))
+async def _merge_listed_prs(repo: RepoOverview, prs: list[dict[str, Any]]) -> list[MergeResult]:
+    """Pre-flight then merge each PR, returning one result per PR attempted."""
+    results: list[MergeResult] = []
+    for pr in prs:
+        pr_number = pr.get("number")
+        if not isinstance(pr_number, int):
+            continue  # malformed entry; nothing to merge or report
+        pr_title = pr.get("title", "")
 
-        yield RepoProgress(repo.name, "done", results)
+        blocked = _preflight_reason(pr)
+        if blocked:
+            results.append(MergeResult(pr_number, pr_title, False, blocked))
+            continue
+
+        success, reason = await _merge_pr(repo.owner, repo.name, pr_number)
+        results.append(MergeResult(pr_number, pr_title, success, reason))
+
+    return results
 
 
 def _preflight_reason(pr: dict[str, Any]) -> str | None:
