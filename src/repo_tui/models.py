@@ -89,7 +89,9 @@ class RepoOverview:
     topics: list[str] | None = None
     pull_requests: list[PullRequest] | None = None
     details_loaded: bool = False
-    has_uncommitted_changes: bool = False
+    # None means git could not be run for this checkout, which is not the same
+    # as a clean tree — see GitHubClient.get_git_status.
+    has_uncommitted_changes: bool | None = False
     current_branch: str | None = None
     description: str | None = None
     friendly_name: str | None = None
@@ -98,6 +100,9 @@ class RepoOverview:
     # is indistinguishable from a repo that genuinely has no issues and no PRs,
     # and the status dot renders green ("clean") for a repo we know nothing about.
     fetch_failed: bool = False
+    # Set when the Sonar request itself failed (timeout, 5xx, bad token), as
+    # opposed to the project simply not existing — both used to read "No Sonar".
+    sonar_unreachable: bool = False
 
     @property
     def pushed_at_relative(self) -> str | None:

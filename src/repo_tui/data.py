@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import json
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Coroutine
@@ -102,6 +103,7 @@ def _dict_to_repo(d: dict) -> RepoOverview:
         friendly_name=d.get("friendly_name"),
         pushed_at=d.get("pushed_at"),
         fetch_failed=d.get("fetch_failed", False),
+        sonar_unreachable=d.get("sonar_unreachable", False),
     )
 
 
@@ -420,11 +422,12 @@ class GitHubClient:
             return local_path
         return None
 
-    async def get_git_status(self, repo_path: Path) -> tuple[bool, str | None]:
+    async def get_git_status(self, repo_path: Path) -> tuple[bool | None, str | None]:
         """Check if repo has uncommitted changes and get current branch.
 
         Returns:
-            tuple: (has_uncommitted_changes, current_branch)
+            tuple: (has_uncommitted_changes, current_branch), where
+            has_uncommitted_changes is None when git could not be run at all.
         """
         try:
             # Check for uncommitted changes (ignoring untracked files)
@@ -440,7 +443,9 @@ class GitHubClient:
             stdout, _ = await proc.communicate()
 
             if proc.returncode != 0:
-                return (False, None)
+                # None, not False: a git that failed to run tells us nothing about
+                # the working tree, and False renders as a clean repo.
+                return (None, None)
 
             # Only count modified/added/deleted tracked files, not untracked files (??)
             status_lines = stdout.decode().strip().split("\n")
@@ -466,7 +471,7 @@ class GitHubClient:
             return (has_changes, current_branch)
 
         except Exception:
-            return (False, None)
+            return (None, None)
 
 
 class SonarCloudClient:
@@ -516,11 +521,19 @@ class SonarCloudClient:
                 url=dashboard_url,
                 conditions=project_status.get("conditions", []),
             )
+        except NetworkError:
+            raise
         except Exception:
+            # Malformed payload for a project that does exist — treat as absent.
             return None
 
     def _fetch_url(self, url: str) -> dict[str, Any] | None:
-        """Fetch URL and return JSON data."""
+        """Fetch URL and return JSON data.
+
+        Returns None when Sonar answers "no such project" (404). Any other
+        failure — timeout, 5xx, bad token, DNS — raises NetworkError, because
+        "we could not ask" must not be reported as "no project here".
+        """
         try:
             request = urllib.request.Request(url)
 
@@ -544,11 +557,18 @@ class SonarCloudClient:
                     with open("/tmp/sonar-fetch-debug.log", "a") as f:
                         f.write(f"Success: {data}\n")
                 return data
+        except urllib.error.HTTPError as e:
+            if self.config.data.get("debug", False):
+                with open("/tmp/sonar-fetch-debug.log", "a") as f:
+                    f.write(f"HTTP {e.code}: {e}\n")
+            if e.code == 404:
+                return None
+            raise NetworkError(f"sonar request failed (HTTP {e.code})") from e
         except Exception as e:
             if self.config.data.get("debug", False):
                 with open("/tmp/sonar-fetch-debug.log", "a") as f:
                     f.write(f"Error: {e}\n")
-            return None
+            raise NetworkError(f"sonar request failed: {e}") from e
 
     def guess_project_key(self, owner: str, repo: str) -> list[str]:
         """Generate possible SonarCloud project keys."""
@@ -704,7 +724,7 @@ async def fetch_all_repos(
         pushed_at = repo_data.get("pushedAt")
 
         # Check git status if repo is local
-        has_uncommitted = False
+        has_uncommitted: bool | None = False
         current_branch = None
         if local_path:
             has_uncommitted, current_branch = await github.get_git_status(local_path)
@@ -712,6 +732,7 @@ async def fetch_all_repos(
         # Check SonarCloud status if enabled
         sonar_status = None
         sonar_checked = False
+        sonar_unreachable = False
         if check_sonar:
             project_keys = sonar.guess_project_key(owner, repo_name)
             # Debug logging (if enabled)
@@ -721,7 +742,13 @@ async def fetch_all_repos(
                     f.write(f"Project keys to try: {project_keys}\n")
 
             for project_key in project_keys:
-                sonar_status = await sonar.get_project_status(project_key)
+                try:
+                    sonar_status = await sonar.get_project_status(project_key)
+                except NetworkError:
+                    # The instance is unreachable, so trying the remaining key
+                    # spellings just repeats the same timeout.
+                    sonar_unreachable = True
+                    break
                 if config.data.get("debug", False):
                     with open("/tmp/sonar-check-debug.log", "a") as f:
                         f.write(f"Tried {project_key}: {sonar_status}\n")
@@ -753,6 +780,7 @@ async def fetch_all_repos(
             friendly_name=config.get_friendly_name(repo_name),
             pushed_at=pushed_at,
             fetch_failed=fetch_failed,
+            sonar_unreachable=sonar_unreachable,
         )
 
     # Process in batches to avoid overwhelming the API
@@ -803,7 +831,7 @@ async def fetch_single_repo(
 
     if owner == LOCAL_ONLY_OWNER:
         path = local_path or github.get_local_repo_path(repo_name)
-        has_uncommitted = False
+        has_uncommitted: bool | None = False
         current_branch = None
         pushed_at = None
         if path:
@@ -836,10 +864,15 @@ async def fetch_single_repo(
         issues, pull_requests = [], []
 
     sonar_status = None
+    sonar_unreachable = False
     if check_sonar:
         project_keys = sonar.guess_project_key(owner, repo_name)
         for project_key in project_keys:
-            sonar_status = await sonar.get_project_status(project_key)
+            try:
+                sonar_status = await sonar.get_project_status(project_key)
+            except NetworkError:
+                sonar_unreachable = True
+                break
             if sonar_status:
                 break
 
@@ -868,6 +901,7 @@ async def fetch_single_repo(
         current_branch=current_branch,
         friendly_name=config.get_friendly_name(repo_name),
         fetch_failed=fetch_failed,
+        sonar_unreachable=sonar_unreachable,
     )
 
 

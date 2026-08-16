@@ -8,6 +8,7 @@ auth error or a network drop produced open_issues_count=0 and pull_requests=[]
 from __future__ import annotations
 
 import json
+import urllib.error
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -202,6 +203,99 @@ def test_failed_repo_does_not_render_as_clean() -> None:
 
     assert "[green]●[/green]" not in rendered
     assert "fetch failed" in rendered
+
+
+# ---------- git status: unknown is not clean -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_git_status_unknown_when_git_fails(tmp_path: Path) -> None:
+    client = GitHubClient(_config(tmp_path))
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as spawn:
+        spawn.return_value = _FakeProc(128, stderr=b"fatal: not a git repository")
+        has_changes, branch = await client.get_git_status(tmp_path)
+
+    # None, not False — False is indistinguishable from a clean tree.
+    assert has_changes is None
+    assert branch is None
+
+
+def test_unknown_git_status_does_not_render_as_clean(tmp_path: Path) -> None:
+    widget = RepoListWidget()
+    repo = RepoOverview(
+        name="widget-api",
+        owner="adamkwhite",
+        url="https://github.com/adamkwhite/widget-api",
+        open_issues_count=0,
+        issues=[],
+        sonar_status=None,
+        local_path=str(tmp_path),
+        has_uncommitted_changes=None,
+    )
+
+    rendered = str(widget._build_repo_option(repo).prompt)
+
+    assert "[green]●[/green]" not in rendered
+    assert "git status unknown" in rendered
+
+
+# ---------- sonar: unreachable is not "no project" -------------------------------
+
+
+def test_sonar_404_means_no_project(tmp_path: Path) -> None:
+    """A 404 is a real answer: this project does not exist."""
+    from repo_tui.data import SonarCloudClient
+
+    client = SonarCloudClient(_config(tmp_path))
+    err = urllib.error.HTTPError("https://sonarcloud.io", 404, "Not Found", {}, None)  # type: ignore[arg-type]
+
+    with patch("urllib.request.urlopen", side_effect=err):
+        assert client._fetch_url("https://sonarcloud.io/api/x") is None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        urllib.error.HTTPError("https://sonarcloud.io", 503, "Service Unavailable", {}, None),  # type: ignore[arg-type]
+        urllib.error.URLError("timed out"),
+    ],
+)
+def test_sonar_transport_failure_raises(tmp_path: Path, error: Exception) -> None:
+    from repo_tui.data import SonarCloudClient
+
+    client = SonarCloudClient(_config(tmp_path))
+
+    with patch("urllib.request.urlopen", side_effect=error), pytest.raises(NetworkError):
+        client._fetch_url("https://sonarcloud.io/api/x")
+
+
+@pytest.mark.asyncio
+async def test_unreachable_sonar_is_not_reported_as_no_project(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+
+    with (
+        patch("repo_tui.data.GitHubClient.get_user_repos", new_callable=AsyncMock) as gh,
+        patch("repo_tui.data.GitHubClient.get_repo_issues", new_callable=AsyncMock) as issues,
+        patch("repo_tui.data.GitHubClient.get_repo_prs", new_callable=AsyncMock) as prs,
+        patch("repo_tui.data.SonarCloudClient.get_project_status", new_callable=AsyncMock) as sonar,
+        patch("repo_tui.data.save_cache"),
+    ):
+        gh.return_value = [_gh_repo()]
+        issues.return_value = []
+        prs.return_value = []
+        sonar.side_effect = NetworkError("sonar request failed: timed out")
+
+        result = await fetch_all_repos(config, check_sonar=True)
+
+    repo = result.repos[0]
+    assert repo.sonar_unreachable is True
+    # One attempt, not one per candidate key spelling.
+    assert sonar.await_count == 1
+
+    rendered = str(RepoListWidget()._build_repo_option(repo).prompt)
+    assert "No Sonar" not in rendered
+    assert "Sonar unreachable" in rendered
 
 
 # ---------- dependabot -----------------------------------------------------------
