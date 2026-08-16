@@ -695,6 +695,69 @@ async def _cached_result(config: Config, github: GitHubClient) -> FetchResult:
     return FetchResult(repos=cached_repos, is_cached=True, cache_timestamp=timestamp)
 
 
+async def _fetch_repo_overview(
+    config: Config,
+    github: GitHubClient,
+    sonar: SonarCloudClient,
+    local_scan: LocalRepoScan,
+    repo_data: dict[str, Any],
+    check_sonar: bool,
+) -> RepoOverview:
+    """Build one repo's overview: issues, PRs, local git state, Sonar."""
+    repo_name = repo_data["name"]
+    owner = repo_data["owner"]["login"]
+
+    issues, pull_requests, fetch_failed = await _fetch_issues_and_prs(
+        github, owner, repo_name, has_issues=repo_data.get("hasIssuesEnabled", True)
+    )
+
+    local_path = local_scan.by_owner_repo.get((owner.lower(), repo_name.lower()))
+    if local_path is None:
+        # Fall back to directory-name match for repos with no remote URL set.
+        local_path = github.get_local_repo_path(repo_name)
+    primary_lang = repo_data.get("primaryLanguage")
+    language = primary_lang.get("name") if primary_lang else None
+    topics_data = repo_data.get("repositoryTopics", [])
+    topics = [t["name"] for t in topics_data] if topics_data else None
+    description = repo_data.get("description")
+    pushed_at = repo_data.get("pushedAt")
+
+    # Check git status if repo is local
+    has_uncommitted: bool | None = False
+    current_branch = None
+    if local_path:
+        has_uncommitted, current_branch = await github.get_git_status(local_path)
+
+    sonar_result = (
+        await check_sonar_status(config, sonar, owner, repo_name)
+        if check_sonar
+        else SonarCheck(None, checked=False, unreachable=False)
+    )
+
+    return RepoOverview(
+        name=repo_name,
+        owner=owner,
+        url=repo_data["url"],
+        open_issues_count=len(issues),
+        issues=issues,
+        sonar_status=sonar_result.status,
+        is_private=repo_data.get("isPrivate", False),
+        local_path=str(local_path) if local_path else None,
+        sonar_checked=sonar_result.checked,
+        language=language,
+        topics=topics,
+        pull_requests=pull_requests,
+        details_loaded=True,
+        has_uncommitted_changes=has_uncommitted,
+        current_branch=current_branch,
+        description=description,
+        friendly_name=config.get_friendly_name(repo_name),
+        pushed_at=pushed_at,
+        fetch_failed=fetch_failed,
+        sonar_unreachable=sonar_result.unreachable,
+    )
+
+
 async def fetch_all_repos(
     config: Config,
     check_sonar: bool = False,
@@ -735,61 +798,7 @@ async def fetch_all_repos(
     # whose origin isn't on GitHub at all.
     local_scan = await scan_local_repos(config.get_local_code_path())
 
-    # Parallel fetch: create tasks for all repos
-    async def fetch_repo_data(repo_data: dict[str, Any]) -> RepoOverview:
-        repo_name = repo_data["name"]
-        owner = repo_data["owner"]["login"]
-
-        issues, pull_requests, fetch_failed = await _fetch_issues_and_prs(
-            github, owner, repo_name, has_issues=repo_data.get("hasIssuesEnabled", True)
-        )
-
-        local_path = local_scan.by_owner_repo.get((owner.lower(), repo_name.lower()))
-        if local_path is None:
-            # Fall back to directory-name match for repos with no remote URL set.
-            local_path = github.get_local_repo_path(repo_name)
-        primary_lang = repo_data.get("primaryLanguage")
-        language = primary_lang.get("name") if primary_lang else None
-        topics_data = repo_data.get("repositoryTopics", [])
-        topics = [t["name"] for t in topics_data] if topics_data else None
-        description = repo_data.get("description")
-        pushed_at = repo_data.get("pushedAt")
-
-        # Check git status if repo is local
-        has_uncommitted: bool | None = False
-        current_branch = None
-        if local_path:
-            has_uncommitted, current_branch = await github.get_git_status(local_path)
-
-        sonar_result = (
-            await check_sonar_status(config, sonar, owner, repo_name)
-            if check_sonar
-            else SonarCheck(None, checked=False, unreachable=False)
-        )
-
-        return RepoOverview(
-            name=repo_name,
-            owner=owner,
-            url=repo_data["url"],
-            open_issues_count=len(issues),
-            issues=issues,
-            sonar_status=sonar_result.status,
-            is_private=repo_data.get("isPrivate", False),
-            local_path=str(local_path) if local_path else None,
-            sonar_checked=sonar_result.checked,
-            language=language,
-            topics=topics,
-            pull_requests=pull_requests,
-            details_loaded=True,
-            has_uncommitted_changes=has_uncommitted,
-            current_branch=current_branch,
-            description=description,
-            friendly_name=config.get_friendly_name(repo_name),
-            pushed_at=pushed_at,
-            fetch_failed=fetch_failed,
-            sonar_unreachable=sonar_result.unreachable,
-        )
-
+    # Parallel fetch: one task per repo, batched below.
     # Process in batches to avoid overwhelming the API
     batch_size = 10
     for i in range(0, total, batch_size):
@@ -797,7 +806,12 @@ async def fetch_all_repos(
         if progress_callback:
             await progress_callback(i + len(batch), total, f"batch {i // batch_size + 1}")
 
-        batch_results = await asyncio.gather(*[fetch_repo_data(r) for r in batch])
+        batch_results = await asyncio.gather(
+            *[
+                _fetch_repo_overview(config, github, sonar, local_scan, r, check_sonar)
+                for r in batch
+            ]
+        )
         overviews.extend(batch_results)
 
     # Add local-only repos (dirs with no GitHub remote) so they show up alongside

@@ -171,14 +171,9 @@ class RepoGridWidget(VerticalScroll):
         # Sort repos (same logic as list view)
         sorted_repos = sorted(repos, key=lambda r: r.pushed_at or "", reverse=True)
 
-        # Debug: log to file
-        with open("/tmp/grid_debug.log", "a") as f:
-            f.write("\n=== set_repos called ===\n")
-            f.write(f"Total repos: {len(sorted_repos)}\n")
-            for i, repo in enumerate(sorted_repos[:10]):
-                f.write(
-                    f"  {i}: {repo.name} - issues:{repo.open_issues_count} branch:{repo.current_branch}\n"
-                )
+        # Textual's own logger, not a file: this ran on every render, ungated by
+        # the debug flag, into a fixed path in the shared temp dir.
+        self.log(f"grid set_repos: {len(sorted_repos)} repos")
 
         # Create cards
         for repo in sorted_repos:
@@ -187,11 +182,10 @@ class RepoGridWidget(VerticalScroll):
                 grid.mount(card)
                 self._cards.append(card)
             except Exception as e:
-                with open("/tmp/grid_debug.log", "a") as f:
-                    f.write(f"ERROR creating card for {repo.name}: {e}\n")
+                # One malformed repo must not leave the grid empty.
+                self.log.error(f"grid card failed for {repo.name}: {e}")
 
-        with open("/tmp/grid_debug.log", "a") as f:
-            f.write(f"Created {len(self._cards)} cards successfully\n")
+        self.log(f"grid mounted {len(self._cards)} cards")
 
         # Focus first card if any
         if self._cards:
