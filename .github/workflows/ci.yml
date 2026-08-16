@@ -6,8 +6,15 @@ on:
     paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore', '.github/**']
   pull_request:
     branches: [main]
-    types: [opened, reopened, ready_for_review]
-    paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore', '.github/**']
+    # `synchronize` = a new commit pushed to an open PR. Without it CI ran on
+    # the PR's first commit and never again, so every follow-up commit --
+    # review fixes, rebases, the commit that actually breaks something --
+    # merged untested behind a green check from an older tree.
+    types: [opened, reopened, ready_for_review, synchronize]
+    # `.github/**` is deliberately NOT ignored here: a workflow edit is exactly
+    # the change most worth running the workflow on, and ignoring it is how the
+    # missing `synchronize` above survived unnoticed.
+    paths-ignore: ['*.md', 'docs/**', 'LICENSE', '.gitignore']
   workflow_dispatch:  # Allow manual triggers
 
 env:
