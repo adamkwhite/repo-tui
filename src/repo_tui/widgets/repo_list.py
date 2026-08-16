@@ -19,6 +19,85 @@ if TYPE_CHECKING:
 
 SPECIAL_ACTION_DEPENDABOT = "dependabot-merge"
 
+# The row is assembled from independent badges. They are module-level and pure
+# so each can be tested against a RepoOverview without mounting a widget, and
+# so the row builder stays a single line of composition per badge.
+
+
+def status_icon(repo: RepoOverview) -> str:
+    """Colored dot summarising the repo, highest-priority signal wins.
+
+    Order matters: "unknown" must outrank the green clean state, or a repo we
+    failed to read renders as healthier than one with a single open issue.
+    """
+    if repo.fetch_failed or repo.has_uncommitted_changes is None:
+        return "[magenta]◌[/magenta]"  # nothing was read; not a verdict
+    if repo.sonar_status and repo.sonar_status.status == "ERROR":
+        return "[red]●[/red]"
+    if repo.critical_issue_count >= 5:
+        return "[red]●[/red]"
+    if repo.sonar_status and repo.sonar_status.status == "WARN":
+        return "[yellow]●[/yellow]"
+    if repo.has_uncommitted_changes:
+        return "[yellow]●[/yellow]"
+    if repo.critical_issue_count > 0:
+        return "[yellow]●[/yellow]"
+    if repo.pull_requests:
+        return "[blue]●[/blue]"  # work in progress
+    return "[green]●[/green]"
+
+
+def counts_badge(repo: RepoOverview) -> str:
+    """ "2 PRs, 3 issues", or the failure marker when the counts are unknown."""
+    if repo.fetch_failed:
+        return " [magenta]fetch failed[/magenta]"
+
+    parts = []
+    pr_count = len(repo.pull_requests) if repo.pull_requests else 0
+    if pr_count:
+        parts.append(f"{pr_count} {'PR' if pr_count == 1 else 'PRs'}")
+    if repo.open_issues_count:
+        parts.append(
+            f"{repo.open_issues_count} {'issue' if repo.open_issues_count == 1 else 'issues'}"
+        )
+    return f" [dim]{', '.join(parts)}[/dim]" if parts else ""
+
+
+def local_badge(repo: RepoOverview) -> str:
+    """Checkout state: branch, uncommitted work, unknown, or remote-only."""
+    if not repo.local_path:
+        return " [dim]\\[remote][/dim]"
+    if repo.has_uncommitted_changes is None:
+        return " [magenta]git status unknown[/magenta]"
+    if repo.has_uncommitted_changes:
+        branch_info = f" on {repo.current_branch}" if repo.current_branch else ""
+        return f" [yellow]✱ uncommitted{branch_info}[/yellow]"
+    if repo.current_branch:
+        return f" [dim]\\[{repo.current_branch}][/dim]"
+    return ""
+
+
+def sonar_badge(repo: RepoOverview) -> str:
+    """Quality gate result, naming the failing metrics when the gate is red."""
+    if repo.sonar_status:
+        status = repo.sonar_status.status
+        if status == "ERROR":
+            failed = [
+                c["metricKey"] for c in repo.sonar_status.conditions if c.get("status") == "ERROR"
+            ]
+            return f" [red]✗ {', '.join(failed[:3]) if failed else 'Quality Gate'}[/red]"
+        if status == "WARN":
+            return " [yellow]⚠ Quality Gate[/yellow]"
+        if status == "OK":
+            return " [green]✓ Sonar[/green]"
+        return ""
+    if repo.sonar_unreachable:
+        # We asked and could not get an answer — not the same as "no project".
+        return " [magenta]◌ Sonar unreachable[/magenta]"
+    if repo.sonar_checked:
+        return " [dim]No Sonar[/dim]"
+    return ""
+
 
 class RepoListWidget(OptionList):
     """Scrollable list of repositories with status indicators."""
@@ -56,23 +135,17 @@ class RepoListWidget(OptionList):
         )
 
         for repo in sorted_repos:
-            option = self._build_repo_option(repo)
-            self.add_option(option)
-
+            self.add_option(self._build_repo_option(repo))
             if repo.name in self.expanded:
-                # Show description first
-                desc_option = self._build_description_option(repo)
-                self.add_option(desc_option)
+                for option in self._expanded_child_options(repo):
+                    self.add_option(option)
 
-                # Show PRs and issues
-                if repo.pull_requests:
-                    for pr in repo.pull_requests:
-                        pr_option = self._build_pr_option(repo, pr)
-                        self.add_option(pr_option)
-                if repo.issues:
-                    for issue in repo.issues:
-                        issue_option = self._build_issue_option(repo, issue)
-                        self.add_option(issue_option)
+    def _expanded_child_options(self, repo: RepoOverview) -> list[Option]:
+        """Rows shown beneath an expanded repo: description, then PRs, then issues."""
+        options = [self._build_description_option(repo)]
+        options += [self._build_pr_option(repo, pr) for pr in repo.pull_requests or []]
+        options += [self._build_issue_option(repo, issue) for issue in repo.issues]
+        return options
 
     def _build_dependabot_action_option(self) -> Option:
         """Build the special pseudo-row that triggers the Dependabot bulk merger."""
@@ -95,94 +168,15 @@ class RepoListWidget(OptionList):
 
     def _build_repo_option(self, repo: RepoOverview) -> Option:
         """Build a rich option for a repository."""
-        # Priority 0: gh failed, so issue/PR counts are unknown, not zero. Must
-        # outrank the green "clean" branch below, which empty lists would hit.
-        if repo.fetch_failed or repo.has_uncommitted_changes is None:
-            icon = "[magenta]◌[/magenta]"
-        # Priority 1: Sonar status (actual code quality issues)
-        elif repo.sonar_status and repo.sonar_status.status == "ERROR":
-            icon = "[red]●[/red]"
-        elif repo.critical_issue_count >= 5:
-            # Priority 2: High number of critical issues (bugs, security, etc.)
-            icon = "[red]●[/red]"
-        elif repo.sonar_status and repo.sonar_status.status == "WARN":
-            icon = "[yellow]●[/yellow]"
-        elif repo.has_uncommitted_changes:
-            # Priority 3: Uncommitted work (needs attention)
-            icon = "[yellow]●[/yellow]"
-        elif repo.critical_issue_count > 0:
-            # Priority 4: Some critical issues
-            icon = "[yellow]●[/yellow]"
-        elif repo.pull_requests:
-            # Priority 5: Active PRs (work in progress)
-            icon = "[blue]●[/blue]"
-        else:
-            # Clean state
-            icon = "[green]●[/green]"
-
         expand_icon = "▼" if repo.name in self.expanded else "▶"
-        issue_count = repo.open_issues_count
-        pr_count = len(repo.pull_requests) if repo.pull_requests else 0
-
-        # Build counts display
-        counts_parts = []
-        if pr_count > 0:
-            pr_label = "PR" if pr_count == 1 else "PRs"
-            counts_parts.append(f"{pr_count} {pr_label}")
-        if issue_count > 0:
-            issue_label = "issue" if issue_count == 1 else "issues"
-            counts_parts.append(f"{issue_count} {issue_label}")
-        counts_badge = f" [dim]{', '.join(counts_parts)}[/dim]" if counts_parts else ""
-        if repo.fetch_failed:
-            counts_badge = " [magenta]fetch failed[/magenta]"
-
-        # Local/remote indicator with branch info
-        local = ""
-        if repo.local_path:
-            if repo.has_uncommitted_changes is None:
-                local = " [magenta]git status unknown[/magenta]"
-            elif repo.has_uncommitted_changes:
-                branch_info = f" on {repo.current_branch}" if repo.current_branch else ""
-                local = f" [yellow]✱ uncommitted{branch_info}[/yellow]"
-            elif repo.current_branch:
-                local = f" [dim]\\[{repo.current_branch}][/dim]"
-        else:
-            local = " [dim]\\[remote][/dim]"
-
-        # Language and cloud env tags
         lang_tag = f" [cyan]\\[{repo.language}][/cyan]" if repo.language else ""
         cloud_tag = f" [magenta]\\[{repo.cloud_env}][/magenta]" if repo.cloud_env else ""
-
-        # SonarCloud status indicator
-        sonar_info = ""
-        if repo.sonar_status:
-            status = repo.sonar_status.status
-            if status == "ERROR":
-                failed = [
-                    c["metricKey"]
-                    for c in repo.sonar_status.conditions
-                    if c.get("status") == "ERROR"
-                ]
-                failed_text = ", ".join(failed[:3]) if failed else "Quality Gate"
-                sonar_info = f" [red]✗ {failed_text}[/red]"
-            elif status == "WARN":
-                sonar_info = " [yellow]⚠ Quality Gate[/yellow]"
-            elif status == "OK":
-                sonar_info = " [green]✓ Sonar[/green]"
-        elif repo.sonar_unreachable:
-            # We asked and could not get an answer — not the same as "no project".
-            sonar_info = " [magenta]◌ Sonar unreachable[/magenta]"
-        elif repo.sonar_checked:
-            # We checked but no SonarCloud project was found
-            sonar_info = " [dim]No Sonar[/dim]"
-
-        # Last push date
-        pushed_tag = ""
-        if repo.pushed_at_relative:
-            pushed_tag = f" [dim]{repo.pushed_at_relative}[/dim]"
+        pushed_tag = f" [dim]{repo.pushed_at_relative}[/dim]" if repo.pushed_at_relative else ""
 
         text = Text.from_markup(
-            f"{icon} {expand_icon} {repo.display_name}{lang_tag}{cloud_tag}{counts_badge}{local}{pushed_tag}{sonar_info}"
+            f"{status_icon(repo)} {expand_icon} {repo.display_name}"
+            f"{lang_tag}{cloud_tag}{counts_badge(repo)}{local_badge(repo)}"
+            f"{pushed_tag}{sonar_badge(repo)}"
         )
         return Option(text, id=f"repo:{repo.name}")
 
@@ -270,26 +264,49 @@ class RepoListWidget(OptionList):
                 self.highlighted = i
                 break
 
-    def get_selected_repo(self) -> RepoOverview | None:
-        """Get the currently selected repository."""
+    def _highlighted_option_id(self) -> str | None:
+        """Option id of the highlighted row, or None if nothing is highlighted."""
         selected = self.highlighted
         if selected is None:
             return None
-
         option = self.get_option_at_index(selected)
-        if not option or not option.id:
+        return option.id if option else None
+
+    def _repo_by_name(self, name: str) -> RepoOverview | None:
+        return next((repo for repo in self.repos if repo.name == name), None)
+
+    def _selected_child_row(self, prefix: str) -> tuple[RepoOverview, int] | None:
+        """Resolve a `<prefix>:<repo>:<number>` row to its repo and number.
+
+        Both inline-child getters below parse the same id shape, so the parsing
+        (and its failure modes: no selection, wrong row type, malformed id,
+        unknown repo) lives here once.
+        """
+        option_id = self._highlighted_option_id()
+        if not option_id or not option_id.startswith(f"{prefix}:"):
             return None
 
-        if option.id.startswith("repo:"):
-            repo_name = option.id.split(":", 1)[1]
-        elif option.id.startswith("issue:") or option.id.startswith("pr:"):
-            repo_name = option.id.split(":")[1]
-        else:
+        parts = option_id.split(":")
+        if len(parts) < 3:
+            return None
+        try:
+            number = int(parts[2])
+        except ValueError:
             return None
 
-        for repo in self.repos:
-            if repo.name == repo_name:
-                return repo
+        repo = self._repo_by_name(parts[1])
+        return (repo, number) if repo else None
+
+    def get_selected_repo(self) -> RepoOverview | None:
+        """Get the currently selected repository."""
+        option_id = self._highlighted_option_id()
+        if not option_id:
+            return None
+
+        # Child rows carry their parent repo name in the same position, so an
+        # issue or PR row still resolves to the repo it belongs to.
+        if option_id.startswith(("repo:", "issue:", "pr:")):
+            return self._repo_by_name(option_id.split(":")[1])
         return None
 
     def get_selected_inline_issue(self) -> tuple[RepoOverview, Issue] | None:
@@ -297,58 +314,24 @@ class RepoListWidget(OptionList):
 
         Returns (repo, issue) tuple or None if a repo row is selected.
         """
-        selected = self.highlighted
-        if selected is None:
+        match = self._selected_child_row("issue")
+        if not match:
             return None
-
-        option = self.get_option_at_index(selected)
-        if not option or not option.id:
-            return None
-
-        if option.id.startswith("issue:"):
-            parts = option.id.split(":")
-            if len(parts) >= 3:
-                repo_name = parts[1]
-                try:
-                    issue_number = int(parts[2])
-                except ValueError:
-                    return None
-
-                for repo in self.repos:
-                    if repo.name == repo_name:
-                        for issue in repo.issues:
-                            if issue.number == issue_number:
-                                return (repo, issue)
-        return None
+        repo, number = match
+        issue = next((i for i in repo.issues if i.number == number), None)
+        return (repo, issue) if issue else None
 
     def get_selected_inline_pr(self) -> tuple[RepoOverview, PullRequest] | None:
         """Get the PR if an inline PR is selected.
 
         Returns (repo, pr) tuple or None if a repo/issue row is selected.
         """
-        selected = self.highlighted
-        if selected is None:
+        match = self._selected_child_row("pr")
+        if not match:
             return None
-
-        option = self.get_option_at_index(selected)
-        if not option or not option.id:
-            return None
-
-        if option.id.startswith("pr:"):
-            parts = option.id.split(":")
-            if len(parts) >= 3:
-                repo_name = parts[1]
-                try:
-                    pr_number = int(parts[2])
-                except ValueError:
-                    return None
-
-                for repo in self.repos:
-                    if repo.name == repo_name and repo.pull_requests:
-                        for pr in repo.pull_requests:
-                            if pr.number == pr_number:
-                                return (repo, pr)
-        return None
+        repo, number = match
+        pr = next((p for p in (repo.pull_requests or []) if p.number == number), None)
+        return (repo, pr) if pr else None
 
     def on_option_list_option_highlighted(
         self,
