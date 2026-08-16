@@ -14,6 +14,13 @@ except ImportError:
     HAS_YAML = False
 
 
+# Debug logs live beside the repo cache, not in the shared world-writable
+# temp dir: anyone on the box can pre-create or symlink a fixed name there
+# (Sonar python:S5443), and the files vanish on reboot exactly when you want
+# yesterday's log.
+LOG_DIR = Path("~/.cache/repo-tui/logs").expanduser()
+
+
 class Config:
     """Configuration management."""
 
@@ -58,6 +65,24 @@ class Config:
         }
         self._save_config(default_config)
         return default_config
+
+    def debug_log(self, name: str, message: str) -> None:
+        """Append to ~/.cache/repo-tui/logs/<name>.log when debug is enabled.
+
+        Single entry point for every debug log in the app, so the location and
+        the "is debug on?" check live in one place instead of being re-derived
+        at each call site (which is how the PR-fetch log ended up writing
+        unconditionally).
+        """
+        if not self.data.get("debug", False):
+            return
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            with open(LOG_DIR / f"{name}.log", "a") as f:
+                f.write(message)
+        except OSError:
+            # Diagnostics must never take down the app they are diagnosing.
+            pass
 
     def _save_config(self, config: dict[str, Any]) -> None:
         """Save configuration to file."""

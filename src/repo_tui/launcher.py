@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import datetime
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -95,16 +97,14 @@ def launch_claude(
         claude_command = config.data.get("claude_command", "claude")
         cmd = build_wt_command(repo, claude_command, issue, pr)
 
-        # Debug logging (if enabled)
-        if config.data.get("debug", False):  # Reuse debug flag
-            with open("/tmp/claude-launch-debug.log", "a") as f:
-                import datetime
-
-                f.write(f"\n=== {datetime.datetime.now()} ===\n")
-                f.write(f"Repo: {repo.name}\n")
-                f.write(f"Local path: {repo.local_path}\n")
-                f.write(f"Claude command: {claude_command}\n")
-                f.write(f"Full command: {cmd}\n")
+        config.debug_log(
+            "claude-launch",
+            f"\n=== {datetime.datetime.now()} ===\n"
+            f"Repo: {repo.name}\n"
+            f"Local path: {repo.local_path}\n"
+            f"Claude command: {claude_command}\n"
+            f"Full command: {cmd}\n",
+        )
 
         subprocess.Popen(
             cmd,
@@ -121,18 +121,11 @@ def launch_claude(
 
     except FileNotFoundError as e:
         error_msg = f"Error: File not found - {e.filename}"
-        if config.data.get("debug", False):
-            with open("/tmp/claude-launch-debug.log", "a") as f:
-                f.write(f"ERROR: {error_msg}\n")
+        config.debug_log("claude-launch", f"ERROR: {error_msg}\n")
         return error_msg
     except Exception as e:
         error_msg = f"Error launching: {e}"
-        if config.data.get("debug", False):
-            with open("/tmp/claude-launch-debug.log", "a") as f:
-                import traceback
-
-                f.write(f"ERROR: {error_msg}\n")
-                f.write(traceback.format_exc())
+        config.debug_log("claude-launch", f"ERROR: {error_msg}\n{traceback.format_exc()}")
         return error_msg
 
 

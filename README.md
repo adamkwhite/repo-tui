@@ -117,7 +117,7 @@ claude_command: claude  # Claude CLI command or full path
 privacy_mode: false
 
 # Debug settings
-debug: false  # Enable debug logging (/tmp/sonar-*.log, /tmp/claude-launch-debug.log)
+debug: false  # Enable debug logging to ~/.cache/repo-tui/logs/
 ```
 
 Or use JSON format (`~/.repo-overview.json`):
@@ -171,9 +171,10 @@ Or use JSON format (`~/.repo-overview.json`):
 
 - **`debug`**: Enable debug logging for troubleshooting
   - Set to `true` to enable detailed logging:
-    - SonarQube API calls: `/tmp/sonar-check-debug.log` and `/tmp/sonar-fetch-debug.log`
-    - PR fetching: `/tmp/pr-fetch-debug.log`
-    - Claude launcher: `/tmp/claude-launch-debug.log`
+  - Logs are written to `~/.cache/repo-tui/logs/`:
+    - SonarQube API calls: `sonar-check.log` and `sonar-fetch.log`
+    - PR fetching: `pr-fetch.log`
+    - Claude launcher: `claude-launch.log`
   - Useful for troubleshooting integration issues
   - Default: `false`
 
