@@ -56,6 +56,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # Full history: the new-code coverage gate below diffs against the
+          # PR base commit, which a shallow clone does not contain.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v7
@@ -95,6 +99,29 @@ jobs:
             echo "No test files found, skipping pytest"
             echo "This is expected for a template repository"
           fi
+
+      # SonarCloud's free plan cannot assign a custom quality gate, so the
+      # "new code must hit 80%" rule is enforced here instead. diff-cover
+      # scores ONLY the lines this PR adds or changes, which is why the
+      # threshold can be 80% while the project sits at 56% overall — existing
+      # untouched code is exempt, same model as Sonar's new-code period.
+      - name: New-code coverage gate
+        if: github.event_name == 'pull_request' && hashFiles('coverage.xml') != ''
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          # Report even on failure: the whole point is seeing WHICH lines are
+          # uncovered, and a bare non-zero exit does not say.
+          set +e
+          diff-cover coverage.xml \
+            --compare-branch="origin/$BASE_REF" \
+            --fail-under=80 \
+            --markdown-report=diff-cover.md
+          status=$?
+          set -e
+          [ -f diff-cover.md ] && cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       # Hand coverage.xml to the downstream `sonarcloud` job so it does not
       # re-run the entire pytest suite (saves ~6 min/PR).
