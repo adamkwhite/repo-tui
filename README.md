@@ -178,7 +178,7 @@ Or use JSON format (`~/.repo-overview.json`):
 
 ### Example Configurations
 
-**Personal repos:**
+**Personal repos, no SonarCloud:**
 ```yaml
 included_repos: []
 excluded_repos:
@@ -187,6 +187,48 @@ excluded_repos:
 sonarcloud_org: null
 github_org: null
 local_code_path: ~/Code
+```
+
+**Personal repos with SonarCloud:**
+
+When you sign into SonarCloud with GitHub, your personal organization key is your
+GitHub username. Both values below are the same string for that reason. Run with
+`./run.sh -s` to actually check quality gates.
+
+```yaml
+included_repos:
+  - invoice-parser
+  - trailhead-api
+  - dotfiles
+excluded_repos: []
+
+# SonarCloud org key — https://sonarcloud.io/organizations/jrivera-dev
+sonarcloud_org: jrivera-dev
+
+# Leave null for personal repos; `gh repo list` already scopes to your account.
+github_org: null
+
+local_code_path: ~/Code
+```
+
+**Organization repos with self-hosted SonarQube:**
+
+```yaml
+included_repos:
+  - billing-service
+  - customer-api
+excluded_repos: []
+
+# Bound to the GitHub org, so the keys match.
+github_org: northwind-labs
+sonarcloud_org: northwind-labs
+
+# Self-hosted instance instead of sonarcloud.io. `sonar_token_pass` is a path
+# in the `pass` password store, not the token itself: `pass insert work/sonarqube`
+sonar_url: https://sonarqube.northwind-labs.io
+sonar_token_pass: work/sonarqube
+
+local_code_path: ~/work/northwind
 ```
 
 **Organization repos (grouped by feature with comments):**
