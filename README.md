@@ -171,11 +171,19 @@ Or use JSON format (`~/.repo-overview.json`):
 
 - **`debug`**: Enable debug logging for troubleshooting
   - Set to `true` to enable detailed logging:
-  - Logs are written to `~/.cache/repo-tui/logs/`:
-    - SonarQube API calls: `sonar-check.log` and `sonar-fetch.log`
-    - PR fetching: `pr-fetch.log`
-    - Claude launcher: `claude-launch.log`
-  - Useful for troubleshooting integration issues
+  - Logs are written to `~/.cache/repo-tui/logs/`, one file per subsystem:
+
+    | File | Contents |
+    |------|----------|
+    | `pr-fetch.log` | `gh pr list` calls and their results |
+    | `sonar-check.log` | which project keys were tried for each repo |
+    | `sonar-fetch.log` | raw SonarQube API requests and responses |
+    | `claude-launch.log` | the `wt.exe` command line and launch errors |
+
+  - Names follow `<subsystem>-<action>.log`. They are declared in the
+    `DebugLog` enum in `src/repo_tui/config.py` and written only through
+    `Config.debug_log()` — adding a log means adding an enum member, which
+    the test suite checks against the convention.
   - Default: `false`
 
 ### Example Configurations
