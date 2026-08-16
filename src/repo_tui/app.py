@@ -50,7 +50,6 @@ HELP_TEXT = """
   Space         Expand/collapse repo issues
   1             Switch to list view
   2             Switch to grid view
-  3             Switch to Jira view (if configured)
 
 [cyan]Actions[/cyan]
   c             Launch Claude Code
