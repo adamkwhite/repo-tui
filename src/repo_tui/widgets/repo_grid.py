@@ -12,6 +12,77 @@ if TYPE_CHECKING:
     from ..models import RepoOverview
 
 
+# One function per line of the card. Module-level and pure, so each is testable
+# against a RepoOverview without mounting a widget.
+
+
+def card_counts(repo: RepoOverview) -> str:
+    """Issue and PR counts, or the failure marker when they are unknown."""
+    if repo.fetch_failed:
+        # Not "No issues or PRs" — gh failed, so the counts are unknown.
+        return "[magenta]◌ fetch failed[/magenta]"
+
+    parts = []
+    if repo.open_issues_count:
+        label = "issue" if repo.open_issues_count == 1 else "issues"
+        parts.append(f"[cyan]{repo.open_issues_count}[/cyan] {label}")
+    pr_count = len(repo.pull_requests) if repo.pull_requests else 0
+    if pr_count:
+        parts.append(f"[green]{pr_count}[/green] {'PR' if pr_count == 1 else 'PRs'}")
+    return ", ".join(parts) if parts else "[dim]No issues or PRs[/dim]"
+
+
+def card_git_status(repo: RepoOverview) -> str:
+    """Checkout state for the card's second line."""
+    if not repo.local_path:
+        return "[dim]remote[/dim]"
+    if repo.has_uncommitted_changes is None:
+        return "[magenta]◌ git status unknown[/magenta]"
+    if repo.has_uncommitted_changes:
+        return f"[yellow]✱ {repo.current_branch or 'local'}[/yellow]"
+    if repo.current_branch:
+        return f"[dim]⎇ {repo.current_branch}[/dim]"
+    return "[dim]local[/dim]"
+
+
+def card_tags(repo: RepoOverview) -> str:
+    """Language and cloud tags, joined, or empty when the repo has neither."""
+    tags = []
+    if repo.language:
+        tags.append(f"[cyan]{repo.language}[/cyan]")
+    if repo.cloud_env:
+        tags.append(f"[magenta]{repo.cloud_env}[/magenta]")
+    return " · ".join(tags)
+
+
+def card_sonar(repo: RepoOverview) -> str:
+    """Quality gate marker; the card has no room for the failing metric names."""
+    if repo.sonar_status:
+        return {
+            "ERROR": "[red]✗ Sonar[/red]",
+            "WARN": "[yellow]⚠ Sonar[/yellow]",
+            "OK": "[green]✓ Sonar[/green]",
+        }.get(repo.sonar_status.status, "")
+    if repo.sonar_unreachable:
+        return "[magenta]◌ Sonar unreachable[/magenta]"
+    return ""
+
+
+def card_activity(repo: RepoOverview) -> str:
+    """Traffic-light heuristic on open work. Empty when we failed to read the repo."""
+    if repo.fetch_failed or repo.has_uncommitted_changes is None:
+        return ""  # No green "all clear" for a repo we failed to read.
+
+    total = repo.open_issues_count + (len(repo.pull_requests) if repo.pull_requests else 0)
+    if total >= 5:
+        return "🔥"
+    if total >= 2:
+        return "🟡"
+    if total == 0:
+        return "🟢"
+    return ""
+
+
 class RepoCard(Static):
     """A single repository card in the grid."""
 
@@ -23,101 +94,23 @@ class RepoCard(Static):
         self.can_focus = True
 
     def _build_content(self) -> str:
-        """Render the card content."""
+        """Assemble the card from the line builders below."""
         repo = self.repo
 
-        # Build counts
-        issue_count = repo.open_issues_count
-        pr_count = len(repo.pull_requests) if repo.pull_requests else 0
+        lines = ["", f"[bold white]{repo.display_name}[/bold white]", ""]
 
-        counts_parts = []
-        if issue_count > 0:
-            issue_label = "issue" if issue_count == 1 else "issues"
-            counts_parts.append(f"[cyan]{issue_count}[/cyan] {issue_label}")
-        if pr_count > 0:
-            pr_label = "PR" if pr_count == 1 else "PRs"
-            counts_parts.append(f"[green]{pr_count}[/green] {pr_label}")
-        counts = ", ".join(counts_parts) if counts_parts else "[dim]No issues or PRs[/dim]"
-        if repo.fetch_failed:
-            # Not "No issues or PRs" — gh failed, so the counts are unknown.
-            counts = "[magenta]◌ fetch failed[/magenta]"
-
-        # Git status
-        if repo.local_path:
-            if repo.has_uncommitted_changes is None:
-                git_status = "[magenta]◌ git status unknown[/magenta]"
-            elif repo.has_uncommitted_changes:
-                git_status = f"[yellow]✱ {repo.current_branch or 'local'}[/yellow]"
-            elif repo.current_branch:
-                git_status = f"[dim]⎇ {repo.current_branch}[/dim]"
-            else:
-                git_status = "[dim]local[/dim]"
-        else:
-            git_status = "[dim]remote[/dim]"
-
-        # Tags line (language and/or cloud)
-        tags = []
-        if repo.language:
-            tags.append(f"[cyan]{repo.language}[/cyan]")
-        if repo.cloud_env:
-            tags.append(f"[magenta]{repo.cloud_env}[/magenta]")
-        tags_line = " · ".join(tags) if tags else ""
-
-        # SonarCloud status
-        sonar_info = ""
-        if repo.sonar_status:
-            status = repo.sonar_status.status
-            if status == "ERROR":
-                sonar_info = "[red]✗ Sonar[/red]"
-            elif status == "WARN":
-                sonar_info = "[yellow]⚠ Sonar[/yellow]"
-            elif status == "OK":
-                sonar_info = "[green]✓ Sonar[/green]"
-        elif repo.sonar_unreachable:
-            sonar_info = "[magenta]◌ Sonar unreachable[/magenta]"
-
-        # Activity indicator (basic heuristic)
-        activity = ""
-        total_items = issue_count + pr_count
-        if repo.fetch_failed or repo.has_uncommitted_changes is None:
-            activity = ""  # No green "all clear" for a repo we failed to read.
-        elif total_items >= 5:
-            activity = "🔥"
-        elif total_items >= 2:
-            activity = "🟡"
-        elif total_items == 0:
-            activity = "🟢"
-
-        # Build card content - always show name prominently
-        lines = [
-            "",  # Top padding
-            f"[bold white]{repo.display_name}[/bold white]",
-            "",
-        ]
-
-        # Tags (if any)
+        tags_line = card_tags(repo)
         if tags_line:
-            lines.append(tags_line)
-            lines.append("")
+            lines += [tags_line, ""]
 
-        # Always show counts and git status
-        lines.append(counts)
-        lines.append(git_status)
+        lines += [card_counts(repo), card_git_status(repo)]
 
-        # Last push date
         if repo.pushed_at_relative:
             lines.append(f"[dim]{repo.pushed_at_relative}[/dim]")
 
-        # Bottom line: sonar and/or activity
-        bottom_parts = []
-        if sonar_info:
-            bottom_parts.append(sonar_info)
-        if activity:
-            bottom_parts.append(activity)
-
-        if bottom_parts:
-            lines.append("")
-            lines.append(" ".join(bottom_parts))
+        bottom = [part for part in (card_sonar(repo), card_activity(repo)) if part]
+        if bottom:
+            lines += ["", " ".join(bottom)]
 
         return "\n".join(lines)
 
