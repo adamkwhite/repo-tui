@@ -44,7 +44,9 @@ class RepoCard(Static):
 
         # Git status
         if repo.local_path:
-            if repo.has_uncommitted_changes:
+            if repo.has_uncommitted_changes is None:
+                git_status = "[magenta]◌ git status unknown[/magenta]"
+            elif repo.has_uncommitted_changes:
                 git_status = f"[yellow]✱ {repo.current_branch or 'local'}[/yellow]"
             elif repo.current_branch:
                 git_status = f"[dim]⎇ {repo.current_branch}[/dim]"
@@ -71,11 +73,13 @@ class RepoCard(Static):
                 sonar_info = "[yellow]⚠ Sonar[/yellow]"
             elif status == "OK":
                 sonar_info = "[green]✓ Sonar[/green]"
+        elif repo.sonar_unreachable:
+            sonar_info = "[magenta]◌ Sonar unreachable[/magenta]"
 
         # Activity indicator (basic heuristic)
         activity = ""
         total_items = issue_count + pr_count
-        if repo.fetch_failed:
+        if repo.fetch_failed or repo.has_uncommitted_changes is None:
             activity = ""  # No green "all clear" for a repo we failed to read.
         elif total_items >= 5:
             activity = "🔥"

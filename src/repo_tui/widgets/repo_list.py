@@ -97,7 +97,7 @@ class RepoListWidget(OptionList):
         """Build a rich option for a repository."""
         # Priority 0: gh failed, so issue/PR counts are unknown, not zero. Must
         # outrank the green "clean" branch below, which empty lists would hit.
-        if repo.fetch_failed:
+        if repo.fetch_failed or repo.has_uncommitted_changes is None:
             icon = "[magenta]◌[/magenta]"
         # Priority 1: Sonar status (actual code quality issues)
         elif repo.sonar_status and repo.sonar_status.status == "ERROR":
@@ -139,7 +139,9 @@ class RepoListWidget(OptionList):
         # Local/remote indicator with branch info
         local = ""
         if repo.local_path:
-            if repo.has_uncommitted_changes:
+            if repo.has_uncommitted_changes is None:
+                local = " [magenta]git status unknown[/magenta]"
+            elif repo.has_uncommitted_changes:
                 branch_info = f" on {repo.current_branch}" if repo.current_branch else ""
                 local = f" [yellow]✱ uncommitted{branch_info}[/yellow]"
             elif repo.current_branch:
@@ -167,6 +169,9 @@ class RepoListWidget(OptionList):
                 sonar_info = " [yellow]⚠ Quality Gate[/yellow]"
             elif status == "OK":
                 sonar_info = " [green]✓ Sonar[/green]"
+        elif repo.sonar_unreachable:
+            # We asked and could not get an answer — not the same as "no project".
+            sonar_info = " [magenta]◌ Sonar unreachable[/magenta]"
         elif repo.sonar_checked:
             # We checked but no SonarCloud project was found
             sonar_info = " [dim]No Sonar[/dim]"

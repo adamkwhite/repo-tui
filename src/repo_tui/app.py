@@ -69,6 +69,7 @@ HELP_TEXT = """
   [yellow]●[/yellow]             Sonar WARN, uncommitted changes, or 1-4 critical issues
   [blue]●[/blue]             Active PRs or work in progress
   [green]●[/green]             Clean (no issues or uncommitted work)
+  [magenta]◌[/magenta]             Unknown — gh or git failed, so nothing was read
 
 [dim]Critical labels: bug, security, breaking-change, ci-failure, priority-high, status-blocked[/dim]
 [dim]Note: Terminal color schemes may render yellow as orange, blue as purple[/dim]
@@ -1053,7 +1054,7 @@ class RepoOverviewApp(App[None]):
         await asyncio.sleep(0.1)
 
         try:
-            from .data import SonarCloudClient
+            from .data import NetworkError, SonarCloudClient
 
             sonar = SonarCloudClient(self.config)
 
@@ -1063,8 +1064,17 @@ class RepoOverviewApp(App[None]):
 
                 # Try to find sonar project
                 project_keys = sonar.guess_project_key(repo.owner, repo.name)
+                repo.sonar_unreachable = False
                 for project_key in project_keys:
-                    sonar_status = await sonar.get_project_status(project_key)
+                    try:
+                        sonar_status = await sonar.get_project_status(project_key)
+                    except NetworkError:
+                        # Instance is down; the remaining key spellings would
+                        # only repeat the same timeout.
+                        repo.sonar_unreachable = True
+                        repo.sonar_checked = True
+                        repo.sonar_status = None
+                        break
                     if sonar_status:
                         repo.sonar_status = sonar_status
                         repo.sonar_checked = True
