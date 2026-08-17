@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from .config import Config
+from .config import Config, DebugLog
 from .models import Issue, PullRequest, RepoOverview, SonarStatus
 
 if TYPE_CHECKING:
@@ -295,7 +295,7 @@ async def check_sonar_status(
     """
     project_keys = sonar.guess_project_key(owner, repo_name)
     config.debug_log(
-        "sonar-check",
+        DebugLog.SONAR_CHECK,
         f"\n=== Checking sonar for {repo_name} ===\nProject keys to try: {project_keys}\n",
     )
 
@@ -304,11 +304,11 @@ async def check_sonar_status(
             status = await sonar.get_project_status(project_key)
         except NetworkError:
             return SonarCheck(None, checked=True, unreachable=True)
-        config.debug_log("sonar-check", f"Tried {project_key}: {status}\n")
+        config.debug_log(DebugLog.SONAR_CHECK, f"Tried {project_key}: {status}\n")
         if status:
             return SonarCheck(status, checked=True, unreachable=False)
 
-    config.debug_log("sonar-check", f"Final: checked=True, status=None ({repo_name})\n")
+    config.debug_log(DebugLog.SONAR_CHECK, f"Final: checked=True, status=None ({repo_name})\n")
     return SonarCheck(None, checked=True, unreachable=False)
 
 
@@ -320,7 +320,7 @@ class GitHubClient:
 
     def _debug(self, message: str) -> None:
         """Append to the PR fetch debug log, but only when debug is enabled."""
-        self.config.debug_log("pr-fetch", message)
+        self.config.debug_log(DebugLog.PR_FETCH, message)
 
     async def get_user_repos(self) -> list[dict[str, Any]]:
         """Get all repositories for the authenticated user or organization."""
@@ -570,20 +570,20 @@ class SonarCloudClient:
                 request.add_header("Authorization", f"Basic {credentials}")
 
             self.config.debug_log(
-                "sonar-fetch", f"\nFetching: {url}\nHas token: {bool(self.token)}\n"
+                DebugLog.SONAR_FETCH, f"\nFetching: {url}\nHas token: {bool(self.token)}\n"
             )
 
             with urllib.request.urlopen(request, timeout=10) as response:
                 data: dict[str, Any] = json.loads(response.read().decode())
-                self.config.debug_log("sonar-fetch", f"Success: {data}\n")
+                self.config.debug_log(DebugLog.SONAR_FETCH, f"Success: {data}\n")
                 return data
         except urllib.error.HTTPError as e:
-            self.config.debug_log("sonar-fetch", f"HTTP {e.code}: {e}\n")
+            self.config.debug_log(DebugLog.SONAR_FETCH, f"HTTP {e.code}: {e}\n")
             if e.code == 404:
                 return None
             raise NetworkError(f"sonar request failed (HTTP {e.code})") from e
         except Exception as e:
-            self.config.debug_log("sonar-fetch", f"Error: {e}\n")
+            self.config.debug_log(DebugLog.SONAR_FETCH, f"Error: {e}\n")
             raise NetworkError(f"sonar request failed: {e}") from e
 
     def guess_project_key(self, owner: str, repo: str) -> list[str]:

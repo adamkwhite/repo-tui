@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,26 @@ except ImportError:
 # (Sonar python:S5443), and the files vanish on reboot exactly when you want
 # yesterday's log.
 LOG_DIR = Path("~/.cache/repo-tui/logs").expanduser()
+
+# Every debug log the app writes. A closed set rather than a free-form string
+# because the names drifted once already: three writes went to a
+# `grid_debug.log` that matched neither the location nor the naming of the
+# rest, and nothing flagged it.
+#
+# Convention: <subsystem>-<action>, lowercase, hyphen-separated, no extension
+# (`.log` is appended when the file is opened). Enforced by LOG_NAME_RE below,
+# which is asserted over this enum in the test suite — so a member that breaks
+# the convention fails CI rather than silently creating an odd file.
+LOG_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)+$")
+
+
+class DebugLog(StrEnum):
+    """Names of the debug logs, one per subsystem that writes one."""
+
+    PR_FETCH = "pr-fetch"
+    SONAR_CHECK = "sonar-check"
+    SONAR_FETCH = "sonar-fetch"
+    CLAUDE_LAUNCH = "claude-launch"
 
 
 class Config:
@@ -66,19 +88,27 @@ class Config:
         self._save_config(default_config)
         return default_config
 
-    def debug_log(self, name: str, message: str) -> None:
+    def debug_log(self, name: DebugLog | str, message: str) -> None:
         """Append to ~/.cache/repo-tui/logs/<name>.log when debug is enabled.
 
-        Single entry point for every debug log in the app, so the location and
-        the "is debug on?" check live in one place instead of being re-derived
-        at each call site (which is how the PR-fetch log ended up writing
-        unconditionally).
+        Single entry point for every debug log in the app, so the location, the
+        naming, and the "is debug on?" check live in one place instead of being
+        re-derived at each call site — which is how the PR-fetch log ended up
+        writing unconditionally, and how grid_debug.log ended up in the temp
+        dir under a different naming scheme entirely.
+
+        `name` must be a DebugLog member. A plain string is accepted for
+        convenience and coerced, which raises ValueError for anything not in
+        the enum: adding a log means adding a member, not inventing a filename
+        at the call site. mypy catches it first; this catches the untyped path.
         """
+        log_name = DebugLog(name)
+
         if not self.data.get("debug", False):
             return
         try:
             LOG_DIR.mkdir(parents=True, exist_ok=True)
-            with open(LOG_DIR / f"{name}.log", "a") as f:
+            with open(LOG_DIR / f"{log_name.value}.log", "a") as f:
                 f.write(message)
         except OSError:
             # Diagnostics must never take down the app they are diagnosing.

@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .config import DebugLog  # runtime use, not just typing
 from .models import Issue, PullRequest, RepoOverview
 
 if TYPE_CHECKING:
@@ -98,7 +99,7 @@ def launch_claude(
         cmd = build_wt_command(repo, claude_command, issue, pr)
 
         config.debug_log(
-            "claude-launch",
+            DebugLog.CLAUDE_LAUNCH,
             f"\n=== {datetime.datetime.now()} ===\n"
             f"Repo: {repo.name}\n"
             f"Local path: {repo.local_path}\n"
@@ -121,11 +122,11 @@ def launch_claude(
 
     except FileNotFoundError as e:
         error_msg = f"Error: File not found - {e.filename}"
-        config.debug_log("claude-launch", f"ERROR: {error_msg}\n")
+        config.debug_log(DebugLog.CLAUDE_LAUNCH, f"ERROR: {error_msg}\n")
         return error_msg
     except Exception as e:
         error_msg = f"Error launching: {e}"
-        config.debug_log("claude-launch", f"ERROR: {error_msg}\n{traceback.format_exc()}")
+        config.debug_log(DebugLog.CLAUDE_LAUNCH, f"ERROR: {error_msg}\n{traceback.format_exc()}")
         return error_msg
 
 
