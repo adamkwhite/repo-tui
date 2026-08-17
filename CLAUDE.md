@@ -265,7 +265,7 @@ if current_widget:
 ```
 
 This pattern is especially important in:
-- `action_sonar_all()` (src/repo_tui/app.py:838-840)
+- `action_sonar_all()` (`grep -n 'def action_sonar_all' src/repo_tui/app.py`)
 - View switching operations
 - Any operation that calls `_get_current_widget()`
 
@@ -286,6 +286,30 @@ A `.ast-grep/rules/empty-return-in-except.yml` rule (run by pre-commit) blocks
 the pattern that caused this: returning an empty collection from an except
 handler. Fix the failure contract instead of silencing the rule.
 
+## Debug Logs (closed set)
+
+Every debug log goes through `Config.debug_log(name, message)` and is named
+from the `DebugLog` enum in `config.py` — `<subsystem>-<action>`, written to
+`~/.cache/repo-tui/logs/<name>.log`. Adding a log means adding an enum member,
+not a filename at the call site.
+
+`tests/test_debug_log_names.py` enforces three things: every member matches
+`LOG_NAME_RE`, no module outside `config.py` contains a `.log` filename
+literal, and every declared member is actually used. The second is the one
+that matters — a `grid_debug.log` once sat in the shared temp dir, ungated by
+the debug flag, while four sibling logs were correct.
+
+## Coverage Gates
+
+SonarCloud's free plan cannot assign a custom quality gate, so coverage is
+gated in CI instead:
+
+- **New code**: `diff-cover` fails a PR under 80% on changed lines only.
+  Needs `fetch-depth: 0`.
+- **Total**: `fail_under` in `[tool.coverage.report]` is a ratchet, set from
+  the number **CI** measures — the local run reads ~1pp higher, so a floor
+  taken from it fails in CI. Raise it as coverage climbs.
+
 ## Current Status
 
 **Branch:** main
@@ -302,7 +326,8 @@ handler. Fix the failure contract instead of silencing the rule.
 Dependabot bulk merge (`D`, `src/repo_tui/dependabot.py`).
 
 **Known Issues:**
-- `launcher.py` is thinly tested (the `wt.exe` path needs subprocess mocking)
+- None open. Coverage is 67% overall; the thinnest areas are the modal screens
+  in `app.py`, which need Textual `Pilot` tests rather than unit tests.
 
 **Next Steps:**
 - Monitor SonarCloud integration for any edge cases
