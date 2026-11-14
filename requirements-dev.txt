@@ -4,6 +4,6 @@ pytest-cov>=4.1.0
 pytest-html>=4.1.0
 pytest-asyncio>=1.4.1.post1
 mypy>=1.5.0
-types-PyYAML>=6.0.12.20260906
+types-PyYAML>=6.0.12.20261103
 ruff>=0.3.0
 diff-cover>=11.0.1
