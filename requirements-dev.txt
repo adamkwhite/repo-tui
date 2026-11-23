@@ -6,4 +6,4 @@ pytest-asyncio>=1.5.0
 mypy>=1.5.0
 types-PyYAML>=6.0.12.20261113
 ruff>=0.3.0
-diff-cover>=11.0.1
+diff-cover>=11.0.4
